@@ -64,6 +64,11 @@ export function defaultPropsForType(type) {
       // compatibilitate cu validatorul vechi, dacă mai apare undeva
       ratedPowerW: 0.5,
 
+      // pentru partea didactică:
+      // pinul "a" este considerat +, pinul "b" este considerat -
+      // dacă îl legi invers, apare avertizare
+      polaritySensitive: true,
+
       // valori calculate după simulare
       brightness: 0,
       displayVoltage: "—",

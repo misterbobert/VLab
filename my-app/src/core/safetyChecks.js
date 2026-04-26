@@ -104,6 +104,69 @@ function isRealLoad(item) {
   );
 }
 
+function isNearZeroConductor(item) {
+  return item.type === "ammeter" || (item.type === "switch" && item.closed);
+}
+
+function hasDirectShortPathBetweenNets(
+  startNet,
+  endNet,
+  items,
+  nodes,
+  wires,
+  nodeToNet
+) {
+  if (startNet === endNet) return true;
+
+  const adj = new Map();
+
+  function addEdge(a, b) {
+    if (!adj.has(a)) adj.set(a, []);
+    if (!adj.has(b)) adj.set(b, []);
+
+    adj.get(a).push(b);
+    adj.get(b).push(a);
+  }
+
+  for (const wire of wires) {
+    const a = nodeToNet.get(wire.aNodeId);
+    const b = nodeToNet.get(wire.bNodeId);
+
+    if (a == null || b == null) continue;
+
+    addEdge(a, b);
+  }
+
+  for (const item of items) {
+    if (!isNearZeroConductor(item)) continue;
+
+    const nets = getItemNets(item, nodes, nodeToNet);
+    if (!nets) continue;
+
+    addEdge(nets.a, nets.b);
+  }
+
+  const seen = new Set();
+  const stack = [startNet];
+
+  seen.add(startNet);
+
+  while (stack.length) {
+    const current = stack.pop();
+
+    if (current === endNet) return true;
+
+    for (const next of adj.get(current) || []) {
+      if (!seen.has(next)) {
+        seen.add(next);
+        stack.push(next);
+      }
+    }
+  }
+
+  return false;
+}
+
 export function detectCircuitWarnings(items, nodes, wires, sol) {
   const warnings = [];
 
@@ -131,7 +194,7 @@ export function detectCircuitWarnings(items, nodes, wires, sol) {
     netUsage.get(nets.b).push(item);
   }
 
-  // 1. Ampermetru pus în paralel
+  // 1. Ampermetru pus în paralel cu o sarcină
   for (const item of items) {
     if (item.type !== "ammeter") continue;
 
@@ -228,7 +291,32 @@ export function detectCircuitWarnings(items, nodes, wires, sol) {
     }
   }
 
-  // 4. Borne inversate la voltmetru / ampermetru
+  // 4. Bec polarizat conectat invers
+  if (sol?.ok) {
+    for (const item of items) {
+      if (item.type !== "bulb") continue;
+      if (item.polaritySensitive === false) continue;
+
+      const nets = getItemNets(item, nodes, nodeToNet);
+      if (!nets) continue;
+
+      const va = getNetVoltage(sol, nets.a);
+      const vb = getNetVoltage(sol, nets.b);
+
+      const delta = va - vb;
+
+      if (delta < -0.01) {
+        addWarning(warnings, {
+          title: "Becul este conectat invers",
+          message:
+            "Ai conectat invers bornele becului. În simulator, pinul stâng al becului este considerat plus, iar pinul drept este considerat minus. Leagă plusul bateriei spre plusul becului și minusul bateriei spre minusul becului.",
+          severity: "danger",
+        });
+      }
+    }
+  }
+
+  // 5. Borne inversate la voltmetru / ampermetru
   if (sol?.ok) {
     for (const item of items) {
       if (item.type !== "voltmeter" && item.type !== "ammeter") continue;
@@ -252,7 +340,7 @@ export function detectCircuitWarnings(items, nodes, wires, sol) {
     }
   }
 
-  // 5. Surse de tensiune puse direct în paralel cu polaritate opusă / tensiuni diferite
+  // 6. Baterii conectate greșit în paralel
   const batteries = items.filter((item) => item.type === "battery");
 
   for (let i = 0; i < batteries.length; i++) {
@@ -290,6 +378,30 @@ export function detectCircuitWarnings(items, nodes, wires, sol) {
           severity: "warning",
         });
       }
+    }
+  }
+
+  // 7. Plusul și minusul aceleiași baterii ajung legate direct între ele
+  for (const battery of batteries) {
+    const nets = getItemNets(battery, nodes, nodeToNet);
+    if (!nets) continue;
+
+    const shorted = hasDirectShortPathBetweenNets(
+      nets.a,
+      nets.b,
+      items,
+      nodes,
+      wires,
+      nodeToNet
+    );
+
+    if (shorted) {
+      addWarning(warnings, {
+        title: "Bateria este scurtcircuitată",
+        message:
+          "Ai legat practic borna pozitivă și borna negativă ale bateriei direct între ele, fără o sarcină utilă între ele. În realitate, acest lucru produce un curent foarte mare, încălzire și poate deteriora bateria sau cablurile.",
+        severity: "danger",
+      });
     }
   }
 

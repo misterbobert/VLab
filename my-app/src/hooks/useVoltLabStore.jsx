@@ -103,7 +103,10 @@ function getElectricalSignature(items, nodes, wires) {
         return {
           ...base,
           R: it.R,
+          Vnom: it.Vnom,
+          Pnom: it.Pnom,
           ratedPowerW: it.ratedPowerW,
+          polaritySensitive: it.polaritySensitive,
         };
       }
 
@@ -155,6 +158,14 @@ function resetCalculatedValues(items) {
 
     if (copy.type === "bulb") {
       copy.brightness = 0;
+      copy.displayVoltage = "—";
+      copy.displayCurrent = "—";
+      copy.displayPower = "—";
+    }
+
+    if (copy.type === "battery") {
+      copy.displayCurrent = "—";
+      copy.displayPower = "—";
     }
 
     return copy;
@@ -174,13 +185,22 @@ function reducer(state, action) {
       };
 
     case "SET_STATUS":
-      return { ...state, statusText: action.text };
+      return {
+        ...state,
+        statusText: action.text,
+      };
 
     case "SET_CAM":
-      return { ...state, cam: action.cam };
+      return {
+        ...state,
+        cam: action.cam,
+      };
 
     case "SET_SELECTED":
-      return { ...state, selectedId: action.id };
+      return {
+        ...state,
+        selectedId: action.id,
+      };
 
     case "SET_ITEMS_NODES_WIRES": {
       const nodes = recalcAllNodes(action.items, action.nodes);
@@ -210,7 +230,10 @@ function reducer(state, action) {
       };
 
     case "SET_SOLUTION":
-      return { ...state, sol: action.sol };
+      return {
+        ...state,
+        sol: action.sol,
+      };
 
     case "SET_SAFETY_DIALOG":
       return {
@@ -243,9 +266,11 @@ export function VoltLabProvider({ children }) {
       dispatch({ type: "SET_SOLUTION", sol: null });
       dispatch({ type: "SET_SAFETY_DIALOG", dialog: null });
 
+      const cleanItems = resetCalculatedValues(snap.items ?? state.items);
+
       dispatch({
         type: "SET_ITEMS_NODES_WIRES",
-        items: snap.items ?? state.items,
+        items: cleanItems,
         nodes: snap.nodes ?? state.nodes,
         wires: snap.wires ?? state.wires,
       });
@@ -742,6 +767,20 @@ export function VoltLabProvider({ children }) {
 
     function closeSafetyDialog() {
       dispatch({ type: "SET_SAFETY_DIALOG", dialog: null });
+
+      dispatch({ type: "SET_RUNNING", running: false });
+      dispatch({ type: "SET_SOLUTION", sol: null });
+
+      const items = resetCalculatedValues(state.items);
+
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items,
+        nodes: state.nodes,
+        wires: state.wires,
+      });
+
+      dispatch({ type: "SET_STATUS", text: "Stopped after warning" });
     }
 
     function undo() {
