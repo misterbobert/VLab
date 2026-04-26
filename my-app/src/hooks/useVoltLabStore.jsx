@@ -13,7 +13,7 @@ import {
   recalcAllNodes,
 } from "../core/defaults";
 
-import { clamp } from "../core/utils";
+import { clamp, uid } from "../core/utils";
 import { screenToWorld } from "../core/coords";
 import { solveNormalDC, applySolutionToItems } from "../core/circuitBuilder";
 import { useHistoryCore } from "./useHistory";
@@ -23,7 +23,7 @@ const Ctx = createContext(null);
 const initialState = {
   mode: "select",
   running: false,
-  isRunning: false, // compat
+  isRunning: false,
   statusText: "Ready",
 
   items: [],
@@ -42,6 +42,26 @@ const initialState = {
 
   sol: null,
 };
+
+function makeJunctionNode(x, y) {
+  return {
+    id: uid("j"),
+    itemId: null,
+    name: "junction",
+    kind: "junction",
+    x,
+    y,
+  };
+}
+
+function makeWire(aNodeId, bNodeId, points = []) {
+  return {
+    id: uid("w"),
+    aNodeId,
+    bNodeId,
+    points,
+  };
+}
 
 // Semnătura circuitului.
 // IMPORTANT: NU punem aici display/brightness,
@@ -98,6 +118,7 @@ function getElectricalSignature(items, nodes, wires) {
       id: n.id,
       itemId: n.itemId,
       name: n.name,
+      kind: n.kind,
       x: n.x,
       y: n.y,
       lx: n.lx,
@@ -105,6 +126,7 @@ function getElectricalSignature(items, nodes, wires) {
     })),
 
     wires: wires.map((w) => ({
+      id: w.id,
       aNodeId: w.aNodeId,
       bNodeId: w.bNodeId,
       points: w.points ?? [],
@@ -239,8 +261,7 @@ export function VoltLabProvider({ children }) {
     [state.items, state.nodes, state.wires]
   );
 
-  // AICI e fixul important:
-  // cât timp simularea rulează, orice schimbare în circuit recalculază automat.
+  // Cât timp simularea rulează, orice schimbare în circuit recalculază automat.
   useEffect(() => {
     if (!state.running) return;
 
@@ -359,10 +380,13 @@ export function VoltLabProvider({ children }) {
     function clearWires() {
       pushHistory("clear wires");
 
+      // Ștergem și nodurile libere, fiindcă ele aparțin cablurilor.
+      const nodes = state.nodes.filter((n) => n.itemId);
+
       dispatch({
         type: "SET_ITEMS_NODES_WIRES",
         items: state.items,
-        nodes: state.nodes,
+        nodes,
         wires: [],
       });
 
@@ -479,29 +503,171 @@ export function VoltLabProvider({ children }) {
         };
       });
 
-      if (replaced) {
-        dispatch({
-          type: "SET_ITEMS_NODES_WIRES",
-          items: state.items,
-          nodes: state.nodes,
-          wires: nextWires,
-        });
-
-        return;
-      }
-
-      const wire = {
-        aNodeId: normA,
-        bNodeId: normB,
-        points,
-      };
+      const wires = replaced
+        ? nextWires
+        : [...state.wires, makeWire(normA, normB, points)];
 
       dispatch({
         type: "SET_ITEMS_NODES_WIRES",
         items: state.items,
         nodes: state.nodes,
-        wires: [...state.wires, wire],
+        wires,
       });
+    }
+
+    // Creează un nod liber simplu pe workspace.
+    // Îl folosim pentru joncțiuni / puncte de legătură.
+    function addJunctionAt(worldX, worldY) {
+      pushHistory("junction");
+
+      const junction = makeJunctionNode(worldX, worldY);
+
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items: state.items,
+        nodes: [...state.nodes, junction],
+        wires: state.wires,
+      });
+
+      setStatus("Added junction");
+
+      return junction.id;
+    }
+
+    // Folosit în modul Wire:
+    // dacă nu avem fir început, pornește firul din nodul ales;
+    // dacă avem fir început, conectează start -> target și termină firul.
+    function useNodeAsWireTarget(nodeId) {
+      if (!nodeId) return;
+
+      if (!state.wire.startNodeId) {
+        dispatch({
+          type: "SET_WIRE_STATE",
+          wire: { startNodeId: nodeId, points: [], previewWorld: null },
+        });
+
+        setStatus("Wire start selected");
+        return;
+      }
+
+      if (state.wire.startNodeId === nodeId) {
+        dispatch({
+          type: "SET_WIRE_STATE",
+          wire: { startNodeId: null, points: [], previewWorld: null },
+        });
+
+        setStatus("Wire cancelled");
+        return;
+      }
+
+      addWire(state.wire.startNodeId, nodeId, state.wire.points ?? []);
+
+      dispatch({
+        type: "SET_WIRE_STATE",
+        wire: { startNodeId: null, points: [], previewWorld: null },
+      });
+
+      setStatus(state.running ? "Running" : "Wire connected");
+    }
+
+    // Creează un nod liber și îl folosește direct în wire mode.
+    // Asta permite click oriunde pe workspace pentru cabluri.
+    function addJunctionAndUseAsWireTarget(worldX, worldY) {
+      pushHistory("junction wire");
+
+      const junction = makeJunctionNode(worldX, worldY);
+
+      let wires = state.wires;
+
+      if (state.wire.startNodeId && state.wire.startNodeId !== junction.id) {
+        wires = [
+          ...state.wires,
+          makeWire(state.wire.startNodeId, junction.id, state.wire.points ?? []),
+        ];
+      }
+
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items: state.items,
+        nodes: [...state.nodes, junction],
+        wires,
+      });
+
+      dispatch({
+        type: "SET_WIRE_STATE",
+        wire: state.wire.startNodeId
+          ? { startNodeId: null, points: [], previewWorld: null }
+          : { startNodeId: junction.id, points: [], previewWorld: null },
+      });
+
+      setStatus(
+        state.wire.startNodeId
+          ? state.running
+            ? "Running"
+            : "Wire connected"
+          : "Junction selected"
+      );
+
+      return junction.id;
+    }
+
+    // Sparge un fir existent în două:
+    // A ---- B devine A ---- J ---- B.
+    // Dacă ai deja un fir început, îl conectează și pe acela la J.
+    function insertJunctionOnWire(wireIndex, worldX, worldY) {
+      const oldWire = state.wires[wireIndex];
+      if (!oldWire) return null;
+
+      pushHistory("split wire");
+
+      const junction = makeJunctionNode(worldX, worldY);
+
+      const wires = [];
+
+      for (let i = 0; i < state.wires.length; i++) {
+        const w = state.wires[i];
+
+        if (i !== wireIndex) {
+          wires.push(w);
+          continue;
+        }
+
+        wires.push(makeWire(w.aNodeId, junction.id));
+        wires.push(makeWire(junction.id, w.bNodeId));
+      }
+
+      if (
+        state.wire.startNodeId &&
+        state.wire.startNodeId !== junction.id
+      ) {
+        wires.push(
+          makeWire(state.wire.startNodeId, junction.id, state.wire.points ?? [])
+        );
+      }
+
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items: state.items,
+        nodes: [...state.nodes, junction],
+        wires,
+      });
+
+      dispatch({
+        type: "SET_WIRE_STATE",
+        wire: state.wire.startNodeId
+          ? { startNodeId: null, points: [], previewWorld: null }
+          : { startNodeId: junction.id, points: [], previewWorld: null },
+      });
+
+      setStatus(
+        state.wire.startNodeId
+          ? state.running
+            ? "Running"
+            : "Wire connected to junction"
+          : "Wire split"
+      );
+
+      return junction.id;
     }
 
     function play() {
@@ -560,7 +726,12 @@ export function VoltLabProvider({ children }) {
 
       handleDrop,
       onItemMouseDown,
+
       addWire,
+      addJunctionAt,
+      useNodeAsWireTarget,
+      addJunctionAndUseAsWireTarget,
+      insertJunctionOnWire,
 
       updateItem,
       deleteItem,
