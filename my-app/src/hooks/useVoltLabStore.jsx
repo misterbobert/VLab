@@ -1,5 +1,18 @@
-import React, { createContext, useContext, useMemo, useReducer, useRef } from "react";
-import { defaultPropsForType, makeItemWithNodes, recalcAllNodes } from "../core/defaults";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+} from "react";
+
+import {
+  defaultPropsForType,
+  makeItemWithNodes,
+  recalcAllNodes,
+} from "../core/defaults";
+
 import { clamp } from "../core/utils";
 import { screenToWorld } from "../core/coords";
 import { solveNormalDC, applySolutionToItems } from "../core/circuitBuilder";
@@ -10,7 +23,7 @@ const Ctx = createContext(null);
 const initialState = {
   mode: "select",
   running: false,
-  isRunning: false, // ✅ compat
+  isRunning: false, // compat
   statusText: "Ready",
 
   items: [],
@@ -29,6 +42,102 @@ const initialState = {
 
   sol: null,
 };
+
+// Semnătura circuitului.
+// IMPORTANT: NU punem aici display/brightness,
+// fiindcă astea sunt rezultate calculate și pot cauza loop.
+function getElectricalSignature(items, nodes, wires) {
+  return JSON.stringify({
+    items: items.map((it) => {
+      const base = {
+        id: it.id,
+        type: it.type,
+        x: it.x,
+        y: it.y,
+        rot: it.rot,
+        sizePct: it.sizePct,
+      };
+
+      if (it.type === "battery") {
+        return {
+          ...base,
+          V: it.V,
+          Rint: it.Rint,
+        };
+      }
+
+      if (it.type === "resistor") {
+        return {
+          ...base,
+          R: it.R,
+        };
+      }
+
+      if (it.type === "switch") {
+        return {
+          ...base,
+          closed: !!it.closed,
+        };
+      }
+
+      if (it.type === "bulb") {
+        return {
+          ...base,
+          R: it.R,
+        };
+      }
+
+      if (it.type === "voltmeter") return base;
+      if (it.type === "ammeter") return base;
+      if (it.type === "ohmmeter") return base;
+
+      return base;
+    }),
+
+    nodes: nodes.map((n) => ({
+      id: n.id,
+      itemId: n.itemId,
+      name: n.name,
+      x: n.x,
+      y: n.y,
+      lx: n.lx,
+      ly: n.ly,
+    })),
+
+    wires: wires.map((w) => ({
+      aNodeId: w.aNodeId,
+      bNodeId: w.bNodeId,
+      points: w.points ?? [],
+    })),
+  });
+}
+
+function solveAndApply(items, nodes, wires) {
+  const sol = solveNormalDC(items, nodes, wires);
+  const solvedItems = applySolutionToItems(items, nodes, sol);
+
+  return { sol, solvedItems };
+}
+
+function resetCalculatedValues(items) {
+  return items.map((it) => {
+    const copy = { ...it };
+
+    if (
+      copy.type === "voltmeter" ||
+      copy.type === "ammeter" ||
+      copy.type === "ohmmeter"
+    ) {
+      copy.display = "—";
+    }
+
+    if (copy.type === "bulb") {
+      copy.brightness = 0;
+    }
+
+    return copy;
+  });
+}
 
 function reducer(state, action) {
   switch (action.type) {
@@ -53,14 +162,30 @@ function reducer(state, action) {
 
     case "SET_ITEMS_NODES_WIRES": {
       const nodes = recalcAllNodes(action.items, action.nodes);
-      return { ...state, items: action.items, nodes, wires: action.wires };
+
+      return {
+        ...state,
+        items: action.items,
+        nodes,
+        wires: action.wires,
+      };
     }
 
     case "SET_WIRE_STATE":
-      return { ...state, wire: { ...state.wire, ...action.wire } };
+      return {
+        ...state,
+        wire: {
+          ...state.wire,
+          ...action.wire,
+        },
+      };
 
     case "SET_RUNNING":
-      return { ...state, running: action.running, isRunning: action.running };
+      return {
+        ...state,
+        running: action.running,
+        isRunning: action.running,
+      };
 
     case "SET_SOLUTION":
       return { ...state, sol: action.sol };
@@ -73,7 +198,6 @@ function reducer(state, action) {
 export function VoltLabProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  // ca să putem calcula coordonate la drag/drag-drop
   const workspaceElRef = useRef(null);
 
   const history = useHistoryCore({
@@ -85,21 +209,61 @@ export function VoltLabProvider({ children }) {
       cam: state.cam,
       mode: state.mode,
     }),
+
     restoreSnapshot: (snap) => {
       dispatch({ type: "SET_RUNNING", running: false });
       dispatch({ type: "SET_SOLUTION", sol: null });
+
       dispatch({
         type: "SET_ITEMS_NODES_WIRES",
         items: snap.items ?? state.items,
         nodes: snap.nodes ?? state.nodes,
         wires: snap.wires ?? state.wires,
       });
+
       dispatch({ type: "SET_SELECTED", id: snap.selectedId ?? null });
       dispatch({ type: "SET_CAM", cam: snap.cam ?? state.cam });
       dispatch({ type: "SET_MODE", mode: snap.mode ?? "select" });
-      dispatch({ type: "SET_WIRE_STATE", wire: { startNodeId: null, points: [], previewWorld: null } });
+
+      dispatch({
+        type: "SET_WIRE_STATE",
+        wire: { startNodeId: null, points: [], previewWorld: null },
+      });
+
+      dispatch({ type: "SET_STATUS", text: "Restored snapshot" });
     },
   });
+
+  const electricalSignature = useMemo(
+    () => getElectricalSignature(state.items, state.nodes, state.wires),
+    [state.items, state.nodes, state.wires]
+  );
+
+  // AICI e fixul important:
+  // cât timp simularea rulează, orice schimbare în circuit recalculază automat.
+  useEffect(() => {
+    if (!state.running) return;
+
+    const { sol, solvedItems } = solveAndApply(
+      state.items,
+      state.nodes,
+      state.wires
+    );
+
+    dispatch({ type: "SET_SOLUTION", sol });
+
+    dispatch({
+      type: "SET_ITEMS_NODES_WIRES",
+      items: solvedItems,
+      nodes: state.nodes,
+      wires: state.wires,
+    });
+
+    dispatch({
+      type: "SET_STATUS",
+      text: sol?.ok ? "Running" : "Solve failed",
+    });
+  }, [state.running, electricalSignature]);
 
   const actions = useMemo(() => {
     function pushHistory(label) {
@@ -121,59 +285,97 @@ export function VoltLabProvider({ children }) {
         ...patch,
         z: clamp(patch.z ?? state.cam.z, 0.25, 3.0),
       };
+
       dispatch({ type: "SET_CAM", cam });
     }
 
     function addItemAt(type, worldX, worldY) {
+      pushHistory("add");
+
       const base = defaultPropsForType(type);
       const { item, nodes } = makeItemWithNodes(type, worldX, worldY, base);
 
       const items = [...state.items, item];
       const allNodes = [...state.nodes, ...nodes];
 
-      dispatch({ type: "SET_ITEMS_NODES_WIRES", items, nodes: allNodes, wires: state.wires });
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items,
+        nodes: allNodes,
+        wires: state.wires,
+      });
+
       dispatch({ type: "SET_SELECTED", id: item.id });
-      pushHistory("add");
       setStatus(`Placed ${type}`);
     }
 
     function updateItem(id, patch) {
-      const items = state.items.map((x) => (x.id === id ? { ...x, ...patch } : x));
-      dispatch({ type: "SET_ITEMS_NODES_WIRES", items, nodes: state.nodes, wires: state.wires });
       pushHistory("edit");
+
+      const items = state.items.map((x) =>
+        x.id === id ? { ...x, ...patch } : x
+      );
+
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items,
+        nodes: state.nodes,
+        wires: state.wires,
+      });
     }
 
     function deleteItem(id) {
       const item = state.items.find((x) => x.id === id);
       if (!item) return;
 
+      pushHistory("delete");
+
       const items = state.items.filter((x) => x.id !== id);
       const nodes = state.nodes.filter((n) => n.itemId !== id);
 
-      // scoate firele care aveau noduri șterse
       const alive = new Set(nodes.map((n) => n.id));
-      const wires = state.wires.filter((w) => alive.has(w.aNodeId) && alive.has(w.bNodeId));
 
-      dispatch({ type: "SET_ITEMS_NODES_WIRES", items, nodes, wires });
+      const wires = state.wires.filter(
+        (w) => alive.has(w.aNodeId) && alive.has(w.bNodeId)
+      );
+
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items,
+        nodes,
+        wires,
+      });
+
       dispatch({ type: "SET_SELECTED", id: null });
-      dispatch({ type: "SET_SOLUTION", sol: null });
-      dispatch({ type: "SET_RUNNING", running: false });
-      dispatch({ type: "SET_WIRE_STATE", wire: { startNodeId: null, points: [], previewWorld: null } });
-      pushHistory("delete");
+
+      dispatch({
+        type: "SET_WIRE_STATE",
+        wire: { startNodeId: null, points: [], previewWorld: null },
+      });
+
+      setStatus(state.running ? "Running" : "Deleted item");
     }
 
     function clearWires() {
-      dispatch({ type: "SET_ITEMS_NODES_WIRES", items: state.items, nodes: state.nodes, wires: [] });
-      dispatch({ type: "SET_WIRE_STATE", wire: { startNodeId: null, points: [], previewWorld: null } });
       pushHistory("clear wires");
-      setStatus("Cleared wires");
+
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items: state.items,
+        nodes: state.nodes,
+        wires: [],
+      });
+
+      dispatch({
+        type: "SET_WIRE_STATE",
+        wire: { startNodeId: null, points: [], previewWorld: null },
+      });
+
+      setStatus(state.running ? "Running" : "Cleared wires");
     }
 
-    // ✅ IMPORTANT: handleDrop compat cu ambele stiluri
-    // - vechi: handleDrop(e, workspaceRef)
-    // - nou: handleDrop(type, clientX, clientY, workspaceEl)
     function handleDrop(...args) {
-      // (e, workspaceRef)
+      // varianta veche: handleDrop(e, workspaceRef)
       if (args[0] && typeof args[0] === "object" && "dataTransfer" in args[0]) {
         const e = args[0];
         const workspaceRef = args[1];
@@ -186,11 +388,13 @@ export function VoltLabProvider({ children }) {
         workspaceElRef.current = el;
 
         let payload = null;
+
         try {
           payload = JSON.parse(e.dataTransfer.getData("text/plain") || "{}");
         } catch {
           payload = null;
         }
+
         if (!payload?.type) return;
 
         const rect = el.getBoundingClientRect();
@@ -202,8 +406,9 @@ export function VoltLabProvider({ children }) {
         return;
       }
 
-      // (type, clientX, clientY, workspaceEl)
+      // varianta nouă: handleDrop(type, clientX, clientY, workspaceEl)
       const [type, clientX, clientY, workspaceEl] = args;
+
       if (!type || !workspaceEl) return;
 
       workspaceElRef.current = workspaceEl;
@@ -218,7 +423,9 @@ export function VoltLabProvider({ children }) {
 
     function onItemMouseDown(itemId, e) {
       e.stopPropagation?.();
+
       dispatch({ type: "SET_SELECTED", id: itemId });
+
       if (state.mode !== "select") return;
 
       const el = workspaceElRef.current;
@@ -234,18 +441,27 @@ export function VoltLabProvider({ children }) {
 
       dispatch({
         type: "SET_CAM",
-        cam: { ...state.cam, __drag: { id: itemId, dx: w.x - it.x, dy: w.y - it.y } },
+        cam: {
+          ...state.cam,
+          __drag: {
+            id: itemId,
+            dx: w.x - it.x,
+            dy: w.y - it.y,
+          },
+        },
       });
     }
 
     function addWire(aNodeId, bNodeId, points = []) {
       if (!aNodeId || !bNodeId || aNodeId === bNodeId) return;
 
+      pushHistory("wire");
+
       const normA = aNodeId;
       const normB = bNodeId;
 
-      // dacă există deja wire între aceleași 2 noduri, îl UPDATE-uim (nu îl ignorăm)
       let replaced = false;
+
       const nextWires = state.wires.map((w) => {
         const same =
           (w.aNodeId === normA && w.bNodeId === normB) ||
@@ -254,7 +470,13 @@ export function VoltLabProvider({ children }) {
         if (!same) return w;
 
         replaced = true;
-        return { ...w, aNodeId: normA, bNodeId: normB, points }; // ✅ păstrează points
+
+        return {
+          ...w,
+          aNodeId: normA,
+          bNodeId: normB,
+          points,
+        };
       });
 
       if (replaced) {
@@ -264,12 +486,15 @@ export function VoltLabProvider({ children }) {
           nodes: state.nodes,
           wires: nextWires,
         });
-        pushHistory("wire edit");
+
         return;
       }
 
-      // altfel, adaugă wire nou
-      const wire = { aNodeId: normA, bNodeId: normB, points };
+      const wire = {
+        aNodeId: normA,
+        bNodeId: normB,
+        points,
+      };
 
       dispatch({
         type: "SET_ITEMS_NODES_WIRES",
@@ -277,41 +502,53 @@ export function VoltLabProvider({ children }) {
         nodes: state.nodes,
         wires: [...state.wires, wire],
       });
-      pushHistory("wire");
     }
 
-    // ▶ Play / Stop
     function play() {
       dispatch({ type: "SET_RUNNING", running: true });
       dispatch({ type: "SET_STATUS", text: "Solving..." });
 
-      const sol = solveNormalDC(state.items, state.nodes, state.wires);
+      const { sol, solvedItems } = solveAndApply(
+        state.items,
+        state.nodes,
+        state.wires
+      );
+
       dispatch({ type: "SET_SOLUTION", sol });
 
-      const items = applySolutionToItems(state.items, state.nodes, sol);
-      dispatch({ type: "SET_ITEMS_NODES_WIRES", items, nodes: state.nodes, wires: state.wires });
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items: solvedItems,
+        nodes: state.nodes,
+        wires: state.wires,
+      });
 
-      dispatch({ type: "SET_STATUS", text: sol?.ok ? "Running" : "Solve failed" });
+      dispatch({
+        type: "SET_STATUS",
+        text: sol?.ok ? "Running" : "Solve failed",
+      });
     }
 
     function stop() {
       dispatch({ type: "SET_RUNNING", running: false });
       dispatch({ type: "SET_SOLUTION", sol: null });
 
-      const items = state.items.map((it) => {
-        const copy = { ...it };
-        if (copy.type === "voltmeter" || copy.type === "ammeter" || copy.type === "ohmmeter") copy.display = "—";
-        if (copy.type === "bulb") copy.brightness = 0;
-        return copy;
+      const items = resetCalculatedValues(state.items);
+
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items,
+        nodes: state.nodes,
+        wires: state.wires,
       });
 
-      dispatch({ type: "SET_ITEMS_NODES_WIRES", items, nodes: state.nodes, wires: state.wires });
       dispatch({ type: "SET_STATUS", text: "Stopped" });
     }
 
     function undo() {
       history.undo();
     }
+
     function redo() {
       history.redo();
     }
@@ -337,13 +574,20 @@ export function VoltLabProvider({ children }) {
     };
   }, [state, history]);
 
-  const value = useMemo(() => ({ state, dispatch, actions, history }), [state, actions, history]);
+  const value = useMemo(
+    () => ({ state, dispatch, actions, history }),
+    [state, actions, history]
+  );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useVoltLab() {
   const v = useContext(Ctx);
-  if (!v) throw new Error("useVoltLab must be used inside VoltLabProvider");
+
+  if (!v) {
+    throw new Error("useVoltLab must be used inside VoltLabProvider");
+  }
+
   return v;
 }
