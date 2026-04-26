@@ -3,6 +3,7 @@ import Topbar from "../layout/Topbar";
 import Workspace from "./Workspace";
 import Inspector from "./Inspector";
 import SidebarLibrary from "./SidebarLibrary";
+import SafetyDialog from "./SafetyDialog";
 import { VoltLabProvider } from "../../hooks/useVoltLabStore.jsx";
 
 export default function LabShell() {
@@ -32,6 +33,9 @@ export default function LabShell() {
             <Inspector />
           </div>
         </div>
+
+        {/* Popup pentru greșeli de conectare / suprasarcină */}
+        <SafetyDialog />
       </div>
     </VoltLabProvider>
   );

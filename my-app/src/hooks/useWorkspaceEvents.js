@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useVoltLab } from "./useVoltLabStore.jsx";
 import { screenToWorld, worldToScreen } from "../core/coords";
 import { clamp } from "../core/utils";
@@ -34,11 +34,35 @@ function distancePointToSegment(p, a, b) {
   return Math.sqrt(dist2(p, proj));
 }
 
+function isJunctionNode(n) {
+  return n?.kind === "junction" || n?.itemId == null || n?.name === "junction";
+}
+
 function findNearestNode(nodes, worldPoint, radiusWorld) {
   let best = null;
   let bestD = Infinity;
 
   for (const n of nodes) {
+    const d = dist2(n, worldPoint);
+
+    if (d < bestD) {
+      bestD = d;
+      best = n;
+    }
+  }
+
+  if (!best) return null;
+
+  return bestD <= radiusWorld * radiusWorld ? best : null;
+}
+
+function findNearestJunction(nodes, worldPoint, radiusWorld) {
+  let best = null;
+  let bestD = Infinity;
+
+  for (const n of nodes) {
+    if (!isJunctionNode(n)) continue;
+
     const d = dist2(n, worldPoint);
 
     if (d < bestD) {
@@ -93,8 +117,34 @@ function findNearestWire(wires, nodes, cam, screenPoint, radiusPx = 12) {
   return best && bestD <= radiusPx ? best : null;
 }
 
+function isInsideItemApprox(item, worldPoint) {
+  const size = (item.sizePct ?? 100) / 100;
+
+  const halfW = 115 * size;
+  const halfH = 75 * size;
+
+  const dx = worldPoint.x - item.x;
+  const dy = worldPoint.y - item.y;
+
+  return Math.abs(dx) <= halfW && Math.abs(dy) <= halfH;
+}
+
+function findItemAtWorld(items, worldPoint) {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+
+    if (isInsideItemApprox(it, worldPoint)) {
+      return it;
+    }
+  }
+
+  return null;
+}
+
 export function useWorkspaceEvents(workspaceRef, overlayRef) {
   const { state, actions, dispatch } = useVoltLab();
+
+  const junctionDragRef = useRef(null);
 
   useEffect(() => {
     const el = workspaceRef.current;
@@ -109,18 +159,82 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
       };
     }
 
-    function isBackgroundTarget(target) {
-      return target === el || target === overlayRef.current;
+    function isComponentTarget(target) {
+      if (!target || !el.contains(target)) return false;
+
+      if (target.closest?.("[data-voltlab-item='true']")) return true;
+      if (target.closest?.("[data-item-id]")) return true;
+      if (target.closest?.(".voltlab-item")) return true;
+
+      return false;
+    }
+
+    function isWorkspaceTarget(target) {
+      if (!target) return false;
+
+      if (isComponentTarget(target)) return false;
+
+      if (target === el) return true;
+      if (target === overlayRef.current) return true;
+
+      if (el.contains(target)) return true;
+
+      return false;
     }
 
     function onMouseDown(e) {
-      if (!isBackgroundTarget(e.target)) return;
+      const loc = getLocal(e);
+      const worldPoint = screenToWorld(loc.x, loc.y, state.cam);
+
+      const targetIsComponent = isComponentTarget(e.target);
+      const itemUnderMouse = findItemAtWorld(state.items, worldPoint);
+
+      // Dacă apăsăm pe componentă, NU pornim pan.
+      // Componenta este gestionată de onItemMouseDown din Overlay/useVoltLabStore.
+      if (targetIsComponent || itemUnderMouse) {
+        dispatch({
+          type: "SET_CAM",
+          cam: {
+            ...state.cam,
+            __panCandidate: null,
+            __pan: null,
+          },
+        });
+
+        return;
+      }
+
+      if (!isWorkspaceTarget(e.target)) return;
+
+      if (e.button === 0 && state.mode === "select") {
+        const junctionHitRadiusWorld = 22 / state.cam.z;
+
+        const hitJunction = findNearestJunction(
+          state.nodes,
+          worldPoint,
+          junctionHitRadiusWorld
+        );
+
+        if (hitJunction) {
+          e.preventDefault();
+          e.stopPropagation();
+
+          junctionDragRef.current = {
+            id: hitJunction.id,
+            dx: worldPoint.x - hitJunction.x,
+            dy: worldPoint.y - hitJunction.y,
+          };
+
+          dispatch({ type: "SET_SELECTED", id: null });
+
+          return;
+        }
+      }
 
       if (state.mode === "select") {
         dispatch({ type: "SET_SELECTED", id: null });
       }
 
-      // PAN cu left-drag doar în select mode
       if (e.button === 0 && state.mode === "select") {
         dispatch({
           type: "SET_CAM",
@@ -139,7 +253,6 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
         return;
       }
 
-      // pan start cu middle/right click
       if (e.button === 1 || e.button === 2) {
         e.preventDefault();
 
@@ -159,6 +272,66 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
     }
 
     function onMouseMove(e) {
+      const junctionDrag = junctionDragRef.current;
+
+      // 1. Mutare joncțiune — prioritate maximă.
+      if (junctionDrag) {
+        const loc = getLocal(e);
+        const w = screenToWorld(loc.x, loc.y, state.cam);
+
+        const nodes = state.nodes.map((n) => {
+          if (n.id !== junctionDrag.id) return n;
+
+          return {
+            ...n,
+            x: w.x - junctionDrag.dx,
+            y: w.y - junctionDrag.dy,
+          };
+        });
+
+        dispatch({
+          type: "SET_ITEMS_NODES_WIRES",
+          items: state.items,
+          nodes,
+          wires: state.wires,
+        });
+
+        return;
+      }
+
+      const drag = state.cam.__drag;
+
+      // 2. Mutare componentă — înainte de pan.
+      if (drag) {
+        const loc = getLocal(e);
+        const w = screenToWorld(loc.x, loc.y, state.cam);
+
+        const movedItem = state.items.find((it) => it.id === drag.id);
+        if (!movedItem) return;
+
+        const nextItem = {
+          ...movedItem,
+          x: w.x - drag.dx,
+          y: w.y - drag.dy,
+        };
+
+        const items = state.items.map((it) =>
+          it.id === drag.id ? nextItem : it
+        );
+
+        const nodes = recalcItemNodes(nextItem, state.nodes);
+
+        dispatch({
+          type: "SET_ITEMS_NODES_WIRES",
+          items,
+          nodes,
+          wires: state.wires,
+        });
+
+        return;
+      }
+
+      // 3. Pan doar dacă nu tragem nimic.
       const cand = state.cam.__panCandidate;
 
       if (cand) {
@@ -200,37 +373,6 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
         });
       }
 
-      const drag = state.cam.__drag;
-
-      if (drag) {
-        const r = el.getBoundingClientRect();
-        const sx = e.clientX - r.left;
-        const sy = e.clientY - r.top;
-        const w = screenToWorld(sx, sy, state.cam);
-
-        const movedItem = state.items.find((it) => it.id === drag.id);
-        if (!movedItem) return;
-
-        const nextItem = {
-          ...movedItem,
-          x: w.x - drag.dx,
-          y: w.y - drag.dy,
-        };
-
-        const items = state.items.map((it) =>
-          it.id === drag.id ? nextItem : it
-        );
-
-        const nodes = recalcItemNodes(nextItem, state.nodes);
-
-        dispatch({
-          type: "SET_ITEMS_NODES_WIRES",
-          items,
-          nodes,
-          wires: state.wires,
-        });
-      }
-
       if (state.mode === "wire") {
         const loc = getLocal(e);
         const w = screenToWorld(loc.x, loc.y, state.cam);
@@ -243,6 +385,8 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
     }
 
     function onMouseUp() {
+      junctionDragRef.current = null;
+
       if (state.cam.__panCandidate) {
         dispatch({
           type: "SET_CAM",
@@ -277,17 +421,14 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
     function onWheel(e) {
       e.preventDefault();
 
-      const r = el.getBoundingClientRect();
-      const sx = e.clientX - r.left;
-      const sy = e.clientY - r.top;
-
-      const w = screenToWorld(sx, sy, state.cam);
+      const loc = getLocal(e);
+      const w = screenToWorld(loc.x, loc.y, state.cam);
 
       const delta = -e.deltaY;
       const newZ = clamp(state.cam.z * (delta > 0 ? 1.08 : 0.92), 0.25, 3.0);
 
-      const newX = sx - w.x * newZ;
-      const newY = sy - w.y * newZ;
+      const newX = loc.x - w.x * newZ;
+      const newY = loc.y - w.y * newZ;
 
       actions.setCam({
         x: newX,
@@ -302,16 +443,14 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
 
     function onClick(e) {
       if (state.mode !== "wire") return;
-
-      // doar left click
       if (e.button !== 0) return;
+
+      if (isComponentTarget(e.target)) return;
 
       const loc = getLocal(e);
       const worldPoint = screenToWorld(loc.x, loc.y, state.cam);
       const screenPoint = { x: loc.x, y: loc.y };
 
-      // 1. Mai întâi încercăm să prindem un nod existent.
-      // Radius în world scade când zoom-ul crește, ca vizual să rămână constant.
       const nodeHitRadiusWorld = 18 / state.cam.z;
 
       const hitNode = findNearestNode(
@@ -325,8 +464,6 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
         return;
       }
 
-      // 2. Dacă nu am prins nod, verificăm dacă am dat click pe un fir existent.
-      // Dacă da, firul se sparge: A ---- B devine A ---- J ---- B.
       const hitWire = findNearestWire(
         state.wires,
         state.nodes,
@@ -345,20 +482,29 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
         return;
       }
 
-      // 3. Dacă am dat click pe spațiu gol, creăm un nod liber.
-      // Dacă nu exista fir început, nodul devine început de fir.
-      // Dacă exista fir început, se creează fir până la acest nod.
       actions.addJunctionAndUseAsWireTarget(worldPoint.x, worldPoint.y);
     }
 
     function onKeyDown(e) {
       if (e.key === "Escape") {
+        junctionDragRef.current = null;
+
         dispatch({
           type: "SET_WIRE_STATE",
           wire: {
             startNodeId: null,
             points: [],
             previewWorld: null,
+          },
+        });
+
+        dispatch({
+          type: "SET_CAM",
+          cam: {
+            ...state.cam,
+            __panCandidate: null,
+            __pan: null,
+            __drag: null,
           },
         });
 

@@ -17,6 +17,7 @@ import { clamp, uid } from "../core/utils";
 import { screenToWorld } from "../core/coords";
 import { solveNormalDC, applySolutionToItems } from "../core/circuitBuilder";
 import { useHistoryCore } from "./useHistory";
+import { detectCircuitWarnings } from "../core/safetyChecks";
 
 const Ctx = createContext(null);
 
@@ -41,6 +42,7 @@ const initialState = {
   },
 
   sol: null,
+  safetyDialog: null,
 };
 
 function makeJunctionNode(x, y) {
@@ -63,9 +65,6 @@ function makeWire(aNodeId, bNodeId, points = []) {
   };
 }
 
-// Semnătura circuitului.
-// IMPORTANT: NU punem aici display/brightness,
-// fiindcă astea sunt rezultate calculate și pot cauza loop.
 function getElectricalSignature(items, nodes, wires) {
   return JSON.stringify({
     items: items.map((it) => {
@@ -104,6 +103,7 @@ function getElectricalSignature(items, nodes, wires) {
         return {
           ...base,
           R: it.R,
+          ratedPowerW: it.ratedPowerW,
         };
       }
 
@@ -212,6 +212,12 @@ function reducer(state, action) {
     case "SET_SOLUTION":
       return { ...state, sol: action.sol };
 
+    case "SET_SAFETY_DIALOG":
+      return {
+        ...state,
+        safetyDialog: action.dialog,
+      };
+
     default:
       return state;
   }
@@ -235,6 +241,7 @@ export function VoltLabProvider({ children }) {
     restoreSnapshot: (snap) => {
       dispatch({ type: "SET_RUNNING", running: false });
       dispatch({ type: "SET_SOLUTION", sol: null });
+      dispatch({ type: "SET_SAFETY_DIALOG", dialog: null });
 
       dispatch({
         type: "SET_ITEMS_NODES_WIRES",
@@ -261,7 +268,6 @@ export function VoltLabProvider({ children }) {
     [state.items, state.nodes, state.wires]
   );
 
-  // Cât timp simularea rulează, orice schimbare în circuit recalculază automat.
   useEffect(() => {
     if (!state.running) return;
 
@@ -279,6 +285,22 @@ export function VoltLabProvider({ children }) {
       nodes: state.nodes,
       wires: state.wires,
     });
+
+    const warnings = detectCircuitWarnings(
+      solvedItems,
+      state.nodes,
+      state.wires,
+      sol
+    );
+
+    if (warnings.length > 0 && !state.safetyDialog) {
+      dispatch({
+        type: "SET_SAFETY_DIALOG",
+        dialog: {
+          warnings,
+        },
+      });
+    }
 
     dispatch({
       type: "SET_STATUS",
@@ -380,7 +402,6 @@ export function VoltLabProvider({ children }) {
     function clearWires() {
       pushHistory("clear wires");
 
-      // Ștergem și nodurile libere, fiindcă ele aparțin cablurilor.
       const nodes = state.nodes.filter((n) => n.itemId);
 
       dispatch({
@@ -399,7 +420,6 @@ export function VoltLabProvider({ children }) {
     }
 
     function handleDrop(...args) {
-      // varianta veche: handleDrop(e, workspaceRef)
       if (args[0] && typeof args[0] === "object" && "dataTransfer" in args[0]) {
         const e = args[0];
         const workspaceRef = args[1];
@@ -430,7 +450,6 @@ export function VoltLabProvider({ children }) {
         return;
       }
 
-      // varianta nouă: handleDrop(type, clientX, clientY, workspaceEl)
       const [type, clientX, clientY, workspaceEl] = args;
 
       if (!type || !workspaceEl) return;
@@ -446,6 +465,7 @@ export function VoltLabProvider({ children }) {
     }
 
     function onItemMouseDown(itemId, e) {
+      e.preventDefault?.();
       e.stopPropagation?.();
 
       dispatch({ type: "SET_SELECTED", id: itemId });
@@ -467,6 +487,10 @@ export function VoltLabProvider({ children }) {
         type: "SET_CAM",
         cam: {
           ...state.cam,
+
+          __panCandidate: null,
+          __pan: null,
+
           __drag: {
             id: itemId,
             dx: w.x - it.x,
@@ -515,8 +539,6 @@ export function VoltLabProvider({ children }) {
       });
     }
 
-    // Creează un nod liber simplu pe workspace.
-    // Îl folosim pentru joncțiuni / puncte de legătură.
     function addJunctionAt(worldX, worldY) {
       pushHistory("junction");
 
@@ -534,9 +556,6 @@ export function VoltLabProvider({ children }) {
       return junction.id;
     }
 
-    // Folosit în modul Wire:
-    // dacă nu avem fir început, pornește firul din nodul ales;
-    // dacă avem fir început, conectează start -> target și termină firul.
     function useNodeAsWireTarget(nodeId) {
       if (!nodeId) return;
 
@@ -570,8 +589,6 @@ export function VoltLabProvider({ children }) {
       setStatus(state.running ? "Running" : "Wire connected");
     }
 
-    // Creează un nod liber și îl folosește direct în wire mode.
-    // Asta permite click oriunde pe workspace pentru cabluri.
     function addJunctionAndUseAsWireTarget(worldX, worldY) {
       pushHistory("junction wire");
 
@@ -611,9 +628,6 @@ export function VoltLabProvider({ children }) {
       return junction.id;
     }
 
-    // Sparge un fir existent în două:
-    // A ---- B devine A ---- J ---- B.
-    // Dacă ai deja un fir început, îl conectează și pe acela la J.
     function insertJunctionOnWire(wireIndex, worldX, worldY) {
       const oldWire = state.wires[wireIndex];
       if (!oldWire) return null;
@@ -636,10 +650,7 @@ export function VoltLabProvider({ children }) {
         wires.push(makeWire(junction.id, w.bNodeId));
       }
 
-      if (
-        state.wire.startNodeId &&
-        state.wire.startNodeId !== junction.id
-      ) {
+      if (state.wire.startNodeId && state.wire.startNodeId !== junction.id) {
         wires.push(
           makeWire(state.wire.startNodeId, junction.id, state.wire.points ?? [])
         );
@@ -673,6 +684,7 @@ export function VoltLabProvider({ children }) {
     function play() {
       dispatch({ type: "SET_RUNNING", running: true });
       dispatch({ type: "SET_STATUS", text: "Solving..." });
+      dispatch({ type: "SET_SAFETY_DIALOG", dialog: null });
 
       const { sol, solvedItems } = solveAndApply(
         state.items,
@@ -689,6 +701,22 @@ export function VoltLabProvider({ children }) {
         wires: state.wires,
       });
 
+      const warnings = detectCircuitWarnings(
+        solvedItems,
+        state.nodes,
+        state.wires,
+        sol
+      );
+
+      if (warnings.length > 0) {
+        dispatch({
+          type: "SET_SAFETY_DIALOG",
+          dialog: {
+            warnings,
+          },
+        });
+      }
+
       dispatch({
         type: "SET_STATUS",
         text: sol?.ok ? "Running" : "Solve failed",
@@ -698,6 +726,7 @@ export function VoltLabProvider({ children }) {
     function stop() {
       dispatch({ type: "SET_RUNNING", running: false });
       dispatch({ type: "SET_SOLUTION", sol: null });
+      dispatch({ type: "SET_SAFETY_DIALOG", dialog: null });
 
       const items = resetCalculatedValues(state.items);
 
@@ -709,6 +738,10 @@ export function VoltLabProvider({ children }) {
       });
 
       dispatch({ type: "SET_STATUS", text: "Stopped" });
+    }
+
+    function closeSafetyDialog() {
+      dispatch({ type: "SET_SAFETY_DIALOG", dialog: null });
     }
 
     function undo() {
@@ -739,6 +772,8 @@ export function VoltLabProvider({ children }) {
 
       play,
       stop,
+
+      closeSafetyDialog,
 
       undo,
       redo,

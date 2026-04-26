@@ -11,7 +11,7 @@ function parseSIValue(v) {
   const s = String(v).trim();
 
   // remove spaces + common units
-  const clean = s.replace(/\s+/g, "").replace(/[ΩVA]/gi, "");
+  const clean = s.replace(/\s+/g, "").replace(/[ΩVAWAh%]/gi, "");
 
   // number + optional SI prefix
   const m = clean.match(/^(-?\d+(?:\.\d+)?)([pnumkMGTµu])?$/);
@@ -46,6 +46,11 @@ function parseSIValue(v) {
   return num * mult;
 }
 
+function safeNumber(value, fallback) {
+  const raw = parseSIValue(value);
+  return Number.isFinite(raw) ? raw : fallback;
+}
+
 function safeResistance(value, fallback) {
   const raw = parseSIValue(value);
   return Math.max(1e-6, Number.isFinite(raw) ? raw : fallback);
@@ -57,6 +62,23 @@ function formatOhms(value) {
   if (Math.abs(value) < 1e-6) return "0.00Ω";
 
   return formatSI(value, "Ω");
+}
+
+function formatValue(value, unit) {
+  if (value == null || Number.isNaN(value) || !Number.isFinite(value)) {
+    return "—";
+  }
+
+  return formatSI(value, unit);
+}
+
+function formatSignedValue(value, unit) {
+  if (value == null || Number.isNaN(value) || !Number.isFinite(value)) {
+    return "—";
+  }
+
+  const sign = value < 0 ? "-" : "";
+  return sign + formatSI(Math.abs(value), unit);
 }
 
 // Build a net index for each node by connectivity through wires
@@ -285,12 +307,14 @@ export function solveNormalDC(items, nodes, wires) {
       };
     }
 
-    // Choose a ground. With GMIN below, it's safe even for multiple disconnected circuits.
     const ground = 0;
 
     const resistors = [];
     const currentSources = [];
     const voltageSources = [];
+
+    // Ca să putem afișa curentul prin baterie după solve.
+    const batterySourceByItemId = new Map();
 
     // stamps by components
     for (const it of items) {
@@ -319,6 +343,7 @@ export function solveNormalDC(items, nodes, wires) {
 
       if (it.type === "bulb") {
         const Rb = safeResistance(it.R ?? 30, 30);
+
         resistors.push({
           a: na,
           b: nb,
@@ -333,7 +358,8 @@ export function solveNormalDC(items, nodes, wires) {
 
         const Rint = safeResistance(it.Rint ?? 0.2, 0.2);
 
-        const internal = nodeCount + voltageSources.length;
+        const sourceIndex = voltageSources.length;
+        const internal = nodeCount + sourceIndex;
 
         voltageSources.push({
           a: na,
@@ -345,6 +371,15 @@ export function solveNormalDC(items, nodes, wires) {
           a: internal,
           b: nb,
           R: Rint,
+        });
+
+        batterySourceByItemId.set(it.id, {
+          sourceIndex,
+          V,
+          Rint,
+          aNet: na,
+          bNet: nb,
+          internalNet: internal,
         });
       }
 
@@ -360,7 +395,6 @@ export function solveNormalDC(items, nodes, wires) {
       // voltmeter / ohmmeter don't affect circuit
     }
 
-    // expanded nodeCount because of internal battery nodes
     const maxNodeIndex =
       Math.max(
         nodeCount - 1,
@@ -406,6 +440,7 @@ export function solveNormalDC(items, nodes, wires) {
       voltageSources,
       resistors,
       wires,
+      batterySourceByItemId,
     };
   } catch (e) {
     return {
@@ -431,13 +466,21 @@ export function applySolutionToItems(items, nodes, sol) {
 
       if (copy.type === "bulb") {
         copy.brightness = 0;
+        copy.displayVoltage = "—";
+        copy.displayCurrent = "—";
+        copy.displayPower = "—";
+      }
+
+      if (copy.type === "battery") {
+        copy.displayCurrent = "—";
+        copy.displayPower = "—";
       }
 
       return copy;
     });
   }
 
-  const { nodeToNet, mna, wires } = sol;
+  const { nodeToNet, mna, wires, batterySourceByItemId } = sol;
 
   function V(net) {
     return mna?.V?.[net] ?? 0;
@@ -461,29 +504,47 @@ export function applySolutionToItems(items, nodes, sol) {
     if (copy.type === "bulb") {
       const Rb = safeResistance(copy.R ?? 30, 30);
       const voltage = Math.abs(dV);
+      const current = voltage / Rb;
+      const power = voltage * current;
 
-      const P = (voltage * voltage) / Rb;
-      const Pnom = 0.5;
+      const PnomRaw = safeNumber(copy.Pnom ?? copy.ratedPowerW ?? 0.5, 0.5);
+      const Pnom = Math.max(1e-6, PnomRaw);
 
-      copy.brightness = Math.max(0, Math.min(1, P / Pnom));
+      copy.displayVoltage = formatValue(voltage, "V");
+      copy.displayCurrent = formatValue(current, "A");
+      copy.displayPower = formatValue(power, "W");
+
+      copy.brightness = Math.max(0, Math.min(1, power / Pnom));
+    }
+
+    if (copy.type === "battery") {
+      const meta = batterySourceByItemId?.get(copy.id);
+
+      if (meta) {
+        const current = Math.abs(mna.Ivs?.[meta.sourceIndex] ?? 0);
+        const power = current * Math.abs(meta.V);
+
+        copy.displayCurrent = formatValue(current, "A");
+        copy.displayPower = formatValue(power, "W");
+      } else {
+        copy.displayCurrent = "—";
+        copy.displayPower = "—";
+      }
     }
 
     if (copy.type === "voltmeter") {
-      copy.display = `${Math.abs(dV).toFixed(2)} V`;
+      copy.display = formatSignedValue(dV, "V");
     }
 
     if (copy.type === "ammeter") {
       const Rsh = 1e-4;
-      copy.display = `${(dV / Rsh).toFixed(3)} A`;
+      const current = dV / Rsh;
+
+      copy.display = formatSignedValue(current, "A");
     }
 
     if (copy.type === "ohmmeter") {
-      const req = measureOhmmeterResistance(
-        items,
-        nodes,
-        wires ?? [],
-        copy
-      );
+      const req = measureOhmmeterResistance(items, nodes, wires ?? [], copy);
 
       copy.display = formatOhms(req);
     }
