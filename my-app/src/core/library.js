@@ -8,10 +8,11 @@ export const LIBRARY = [
     id: "passive",
     name: "Passive",
     items: [
-      { type: "resistor", label: "Rezistor", icon: "R", meta: "Ω", sprite: null },
-      { type: "bulb", label: "Bec", icon: "💡", meta: "luminos", sprite: null },
-      { type: "switch", label: "Întrerupător", icon: "S", meta: "deschis/închis", sprite: null },
-    ],
+  { type: "resistor", label: "Resistor", icon: "R", meta: "Ω bands", sprite: null },
+  { type: "capacitor", label: "Capacitor", icon: "C", meta: "charge", sprite: null },
+  { type: "bulb", label: "Bulb", icon: "💡", meta: "brightness", sprite: null },
+  { type: "switch", label: "Switch", icon: "S", meta: "open/close", sprite: null },
+],
   },
   {
     id: "instruments",

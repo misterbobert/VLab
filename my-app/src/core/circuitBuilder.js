@@ -463,7 +463,12 @@ export function applySolutionToItems(items, nodes, sol) {
       ) {
         copy.display = "—";
       }
-
+if (copy.type === "capacitor") {
+  copy.displayVoltage = "—";
+  copy.displayCharge = "—";
+  copy.displayEnergy = "—";
+  copy.displayPercent = "0%";
+}
       if (copy.type === "bulb") {
         copy.brightness = 0;
         copy.displayVoltage = "—";
@@ -516,7 +521,10 @@ export function applySolutionToItems(items, nodes, sol) {
 
       copy.brightness = Math.max(0, Math.min(1, power / Pnom));
     }
-
+if (it.type === "capacitor") {
+  // condensatorul în regim DC final se comportă ca circuit deschis.
+  // încărcarea/descărcarea vizuală este calculată separat în capacitorDynamics.js
+}
     if (copy.type === "battery") {
       const meta = batterySourceByItemId?.get(copy.id);
 

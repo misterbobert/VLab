@@ -6,8 +6,8 @@ import {
   switchSVG,
   bulbSVG,
   batterySVG,
+  capacitorSVG,
 } from "./renderersSvg";
-
 function rotatePoint(x, y, deg) {
   const r = (deg * Math.PI) / 180;
   const c = Math.cos(r);
@@ -43,7 +43,36 @@ export function defaultPropsForType(type) {
       rot: 0,
     };
   }
+if (type === "capacitor") {
+  return {
+    // capacitate în Farazi: 0.001F = 1000µF
+    C: 0.001,
 
+    // tensiunea maximă admisă
+    Vmax: 9,
+
+    // tensiunea actuală memorată pe condensator
+    capVoltage: 0,
+
+    // timpi vizuali RC, în secunde
+    chargeTimeSec: 1.2,
+    dischargeTimeSec: 2.0,
+
+    // pierdere lentă când nu este alimentat
+    leakageEnabled: true,
+
+    // pinul a = +, pinul b = -
+    polaritySensitive: true,
+
+    displayVoltage: "—",
+    displayCharge: "—",
+    displayEnergy: "—",
+    displayPercent: "0%",
+
+    sizePct: 100,
+    rot: 0,
+  };
+}
   if (type === "switch") {
     return {
       closed: true,
@@ -226,7 +255,14 @@ export function renderItemSVG(it) {
   if (it.type === "bulb") {
     return bulbSVG(it.brightness || 0);
   }
-
+if (it.type === "capacitor") {
+  return capacitorSVG(
+    it.capVoltage ?? 0,
+    it.Vmax ?? 9,
+    it.C ?? 0.001,
+    it.polaritySensitive !== false
+  );
+}
   return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
     <rect x="10" y="10" width="180" height="100" rx="20"
       fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.15)"/>

@@ -184,7 +184,57 @@ export function bulbSVG(brightness01) {
     <text x="100" y="102" text-anchor="middle" font-size="14" fill="rgba(255,255,255,0.65)" font-family="ui-sans-serif,system-ui">${Math.round(b * 100)}%</text>
   </svg>`;
 }
+export function capacitorSVG(voltage = 0, vmax = 9, capacitance = 0.001, polaritySensitive = true) {
+  const safeVmax = Math.max(0.000001, Number(vmax) || 9);
+  const v = Number(voltage) || 0;
+  const fill01 = Math.max(0, Math.min(1, Math.abs(v) / safeVmax));
+  const fillH = 62 * fill01;
+  const fillY = 82 - fillH;
 
+  const cText = formatSI(capacitance, "F");
+  const vText = `${v.toFixed(2)}V`;
+  const pctText = `${Math.round(fill01 * 100)}%`;
+
+  const fillColor =
+    fill01 >= 0.95
+      ? "rgba(34,211,238,0.92)"
+      : fill01 >= 0.55
+      ? "rgba(56,189,248,0.78)"
+      : "rgba(125,211,252,0.58)";
+
+  return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+    <rect x="10" y="10" width="180" height="100" rx="20"
+      fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
+
+    <path d="M28 60 H68" stroke="rgba(255,255,255,0.80)" stroke-width="6" stroke-linecap="round"/>
+    <path d="M132 60 H172" stroke="rgba(255,255,255,0.80)" stroke-width="6" stroke-linecap="round"/>
+
+    <rect x="72" y="20" width="56" height="68" rx="12"
+      fill="rgba(0,0,0,0.26)" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
+
+    <clipPath id="capFillClip">
+      <rect x="76" y="24" width="48" height="60" rx="9"/>
+    </clipPath>
+
+    <rect x="76" y="${fillY}" width="48" height="${fillH}" rx="9"
+      fill="${fillColor}" clip-path="url(#capFillClip)"/>
+
+    <path d="M86 34 H114" stroke="rgba(255,255,255,0.75)" stroke-width="5" stroke-linecap="round"/>
+    <path d="M86 74 H114" stroke="rgba(255,255,255,0.75)" stroke-width="5" stroke-linecap="round"/>
+
+    <text x="64" y="38" text-anchor="middle" font-size="12"
+      fill="rgba(255,255,255,0.75)" font-family="ui-sans-serif,system-ui">${polaritySensitive ? "+" : "~"}</text>
+
+    <text x="136" y="38" text-anchor="middle" font-size="12"
+      fill="rgba(255,255,255,0.75)" font-family="ui-sans-serif,system-ui">${polaritySensitive ? "−" : "~"}</text>
+
+    <text x="100" y="100" text-anchor="middle" font-size="12"
+      fill="rgba(255,255,255,0.72)" font-family="ui-sans-serif,system-ui">${cText} · ${pctText}</text>
+
+    <text x="100" y="113" text-anchor="middle" font-size="10"
+      fill="rgba(255,255,255,0.50)" font-family="ui-sans-serif,system-ui">${vText}</text>
+  </svg>`;
+}
 export function batterySVG(V, Rint) {
   const a = formatSI(V, "V");
   const b = formatSI(Rint, "Ω");

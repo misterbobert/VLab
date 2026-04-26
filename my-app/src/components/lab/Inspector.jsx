@@ -65,6 +65,7 @@ function displayName(type) {
   if (type === "bulb") return "Bec";
   if (type === "voltmeter") return "Voltmetru";
   if (type === "ammeter") return "Ampermetru";
+  if (type === "capacitor") return "Condensator";
   if (type === "ohmmeter") return "Ohmmetru";
   return type;
 }
@@ -244,7 +245,131 @@ export default function Inspector() {
               </Field>
             </Section>
           )}
+{selected.type === "capacitor" && (
+  <>
+    <Section title="Specificații condensator">
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Capacitate (µF)">
+          <Input
+            type="number"
+            step="10"
+            min="0.001"
+            value={Math.round((selected.C ?? 0.001) * 1000000)}
+            onChange={(v) =>
+              actions.updateItem(selected.id, {
+                C: Math.max(0.000000001, Number(v) * 0.000001),
+              })
+            }
+          />
+        </Field>
 
+        <Field label="Tensiune maximă (V)">
+          <Input
+            type="number"
+            step="0.1"
+            min="0.1"
+            value={selected.Vmax ?? 9}
+            onChange={(v) =>
+              actions.updateItem(selected.id, {
+                Vmax: clampNumber(v, selected.Vmax ?? 9, 0.1),
+              })
+            }
+          />
+        </Field>
+
+        <Field label="Timp încărcare (s)">
+          <Input
+            type="number"
+            step="0.1"
+            min="0"
+            value={selected.chargeTimeSec ?? 1.2}
+            onChange={(v) =>
+              actions.updateItem(selected.id, {
+                chargeTimeSec: clampNumber(
+                  v,
+                  selected.chargeTimeSec ?? 1.2,
+                  0
+                ),
+              })
+            }
+          />
+        </Field>
+
+        <Field label="Timp descărcare (s)">
+          <Input
+            type="number"
+            step="0.1"
+            min="0"
+            value={selected.dischargeTimeSec ?? 2}
+            onChange={(v) =>
+              actions.updateItem(selected.id, {
+                dischargeTimeSec: clampNumber(
+                  v,
+                  selected.dischargeTimeSec ?? 2,
+                  0
+                ),
+              })
+            }
+          />
+        </Field>
+
+        <Field label="Tensiune inițială (V)">
+          <Input
+            type="number"
+            step="0.1"
+            value={selected.capVoltage ?? 0}
+            onChange={(v) =>
+              actions.updateItem(selected.id, {
+                capVoltage: clampNumber(v, selected.capVoltage ?? 0),
+              })
+            }
+          />
+        </Field>
+
+        <Field label="Polarizat">
+          <button
+            className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm hover:bg-white/10"
+            onClick={() =>
+              actions.updateItem(selected.id, {
+                polaritySensitive: selected.polaritySensitive === false,
+              })
+            }
+          >
+            {selected.polaritySensitive === false ? "Nu" : "Da"}
+          </button>
+        </Field>
+
+        <Field label="Pierdere / descărcare">
+          <button
+            className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm hover:bg-white/10"
+            onClick={() =>
+              actions.updateItem(selected.id, {
+                leakageEnabled: selected.leakageEnabled === false,
+              })
+            }
+          >
+            {selected.leakageEnabled === false ? "Oprită" : "Pornită"}
+          </button>
+        </Field>
+      </div>
+    </Section>
+
+    <Section title="Rezultate condensator">
+      <div className="grid grid-cols-2 gap-3">
+        <Readout label="Tensiune" value={selected.displayVoltage ?? "—"} />
+        <Readout label="Încărcare" value={selected.displayPercent ?? "0%"} />
+        <Readout label="Sarcină" value={selected.displayCharge ?? "—"} />
+        <Readout label="Energie" value={selected.displayEnergy ?? "—"} />
+      </div>
+    </Section>
+
+    <div className="rounded-2xl border border-cyan-300/15 bg-cyan-300/10 p-3 text-xs leading-relaxed text-cyan-100/80">
+      Model didactic: condensatorul este tratat ca circuit deschis în regim DC,
+      iar încărcarea/descărcarea este animată separat în funcție de tensiunea
+      aplicată și timpii setați.
+    </div>
+  </>
+)}
           {selected.type === "bulb" && (
             <>
               <Section title="Specificații bec">

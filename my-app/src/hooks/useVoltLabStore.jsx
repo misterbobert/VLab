@@ -6,7 +6,7 @@ import React, {
   useReducer,
   useRef,
 } from "react";
-
+import { stepCapacitors } from "../core/capacitorDynamics";
 import {
   defaultPropsForType,
   makeItemWithNodes,
@@ -84,7 +84,17 @@ function getElectricalSignature(items, nodes, wires) {
           Rint: it.Rint,
         };
       }
-
+if (it.type === "capacitor") {
+  return {
+    ...base,
+    C: it.C,
+    Vmax: it.Vmax,
+    chargeTimeSec: it.chargeTimeSec,
+    dischargeTimeSec: it.dischargeTimeSec,
+    leakageEnabled: it.leakageEnabled,
+    polaritySensitive: it.polaritySensitive,
+  };
+}
       if (it.type === "resistor") {
         return {
           ...base,
@@ -162,7 +172,13 @@ function resetCalculatedValues(items) {
       copy.displayCurrent = "—";
       copy.displayPower = "—";
     }
-
+if (copy.type === "capacitor") {
+  copy.capVoltage = 0;
+  copy.displayVoltage = "—";
+  copy.displayCharge = "—";
+  copy.displayEnergy = "—";
+  copy.displayPercent = "0%";
+}
     if (copy.type === "battery") {
       copy.displayCurrent = "—";
       copy.displayPower = "—";
@@ -248,7 +264,11 @@ function reducer(state, action) {
 
 export function VoltLabProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+const stateRef = useRef(state);
 
+useEffect(() => {
+  stateRef.current = state;
+}, [state]);
   const workspaceElRef = useRef(null);
 
   const history = useHistoryCore({
@@ -292,7 +312,60 @@ export function VoltLabProvider({ children }) {
     () => getElectricalSignature(state.items, state.nodes, state.wires),
     [state.items, state.nodes, state.wires]
   );
+useEffect(() => {
+  if (!state.running) return;
 
+  let last = performance.now();
+
+  const id = window.setInterval(() => {
+    const now = performance.now();
+    const dtSec = (now - last) / 1000;
+    last = now;
+
+    const s = stateRef.current;
+    if (!s.running) return;
+
+    const { sol, solvedItems } = solveAndApply(s.items, s.nodes, s.wires);
+
+    const withCapacitors = stepCapacitors(
+      solvedItems,
+      s.nodes,
+      s.wires,
+      sol,
+      dtSec
+    );
+
+    dispatch({ type: "SET_SOLUTION", sol });
+
+    dispatch({
+      type: "SET_ITEMS_NODES_WIRES",
+      items: withCapacitors,
+      nodes: s.nodes,
+      wires: s.wires,
+    });
+
+    const warnings = detectCircuitWarnings(
+      withCapacitors,
+      s.nodes,
+      s.wires,
+      sol
+    );
+
+    if (warnings.length > 0 && !s.safetyDialog) {
+      dispatch({
+        type: "SET_SAFETY_DIALOG",
+        dialog: { warnings },
+      });
+    }
+
+    dispatch({
+      type: "SET_STATUS",
+      text: sol?.ok ? "Running" : "Solve failed",
+    });
+  }, 80);
+
+  return () => window.clearInterval(id);
+}, [state.running]);
   useEffect(() => {
     if (!state.running) return;
 
@@ -711,11 +784,19 @@ export function VoltLabProvider({ children }) {
       dispatch({ type: "SET_STATUS", text: "Solving..." });
       dispatch({ type: "SET_SAFETY_DIALOG", dialog: null });
 
-      const { sol, solvedItems } = solveAndApply(
-        state.items,
-        state.nodes,
-        state.wires
-      );
+   const { sol, solvedItems } = solveAndApply(
+  state.items,
+  state.nodes,
+  state.wires
+);
+
+const withCapacitors = stepCapacitors(
+  solvedItems,
+  state.nodes,
+  state.wires,
+  sol,
+  0.08
+);
 
       dispatch({ type: "SET_SOLUTION", sol });
 

@@ -1,4 +1,11 @@
-import { batterySVG, resistorSVG, bulbSVG, switchSVG, meterSVG } from "./renderersSvg";
+import {
+  batterySVG,
+  resistorSVG,
+  bulbSVG,
+  switchSVG,
+  meterSVG,
+  capacitorSVG,
+} from "./renderersSvg";
 
 const cache = new Map();
 
@@ -40,6 +47,14 @@ export function renderComponentCanvas(ctx, item, cam) {
     case "ohmmeter":
       svg = meterSVG("ohmmeter", item.display);
       break;
+      case "capacitor":
+  svg = capacitorSVG(
+    item.capVoltage ?? 0,
+    item.Vmax ?? 9,
+    item.C ?? 0.001,
+    item.polaritySensitive !== false
+  );
+  break;
   }
 
   if (!svg) return;
