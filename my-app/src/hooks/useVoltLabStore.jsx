@@ -6,7 +6,7 @@ import React, {
   useReducer,
   useRef,
 } from "react";
-import { stepCapacitors } from "../core/capacitorDynamics";
+
 import {
   defaultPropsForType,
   makeItemWithNodes,
@@ -16,6 +16,7 @@ import {
 import { clamp, uid } from "../core/utils";
 import { screenToWorld } from "../core/coords";
 import { solveNormalDC, applySolutionToItems } from "../core/circuitBuilder";
+import { stepPowerStorage } from "../core/powerDynamics";
 import { useHistoryCore } from "./useHistory";
 import { detectCircuitWarnings } from "../core/safetyChecks";
 
@@ -65,88 +66,6 @@ function makeWire(aNodeId, bNodeId, points = []) {
   };
 }
 
-function getElectricalSignature(items, nodes, wires) {
-  return JSON.stringify({
-    items: items.map((it) => {
-      const base = {
-        id: it.id,
-        type: it.type,
-        x: it.x,
-        y: it.y,
-        rot: it.rot,
-        sizePct: it.sizePct,
-      };
-
-      if (it.type === "battery") {
-        return {
-          ...base,
-          V: it.V,
-          Rint: it.Rint,
-        };
-      }
-if (it.type === "capacitor") {
-  return {
-    ...base,
-    C: it.C,
-    Vmax: it.Vmax,
-    chargeTimeSec: it.chargeTimeSec,
-    dischargeTimeSec: it.dischargeTimeSec,
-    leakageEnabled: it.leakageEnabled,
-    polaritySensitive: it.polaritySensitive,
-  };
-}
-      if (it.type === "resistor") {
-        return {
-          ...base,
-          R: it.R,
-        };
-      }
-
-      if (it.type === "switch") {
-        return {
-          ...base,
-          closed: !!it.closed,
-        };
-      }
-
-      if (it.type === "bulb") {
-        return {
-          ...base,
-          R: it.R,
-          Vnom: it.Vnom,
-          Pnom: it.Pnom,
-          ratedPowerW: it.ratedPowerW,
-          polaritySensitive: it.polaritySensitive,
-        };
-      }
-
-      if (it.type === "voltmeter") return base;
-      if (it.type === "ammeter") return base;
-      if (it.type === "ohmmeter") return base;
-
-      return base;
-    }),
-
-    nodes: nodes.map((n) => ({
-      id: n.id,
-      itemId: n.itemId,
-      name: n.name,
-      kind: n.kind,
-      x: n.x,
-      y: n.y,
-      lx: n.lx,
-      ly: n.ly,
-    })),
-
-    wires: wires.map((w) => ({
-      id: w.id,
-      aNodeId: w.aNodeId,
-      bNodeId: w.bNodeId,
-      points: w.points ?? [],
-    })),
-  });
-}
-
 function solveAndApply(items, nodes, wires) {
   const sol = solveNormalDC(items, nodes, wires);
   const solvedItems = applySolutionToItems(items, nodes, sol);
@@ -172,16 +91,42 @@ function resetCalculatedValues(items) {
       copy.displayCurrent = "—";
       copy.displayPower = "—";
     }
-if (copy.type === "capacitor") {
-  copy.capVoltage = 0;
-  copy.displayVoltage = "—";
-  copy.displayCharge = "—";
-  copy.displayEnergy = "—";
-  copy.displayPercent = "0%";
-}
+
     if (copy.type === "battery") {
       copy.displayCurrent = "—";
       copy.displayPower = "—";
+      copy.displayRuntime = "—";
+
+      const soc = Number(copy.socPct ?? 100);
+      const nominalV = Number(copy.V ?? 9);
+
+      copy.effectiveV =
+        Number.isFinite(soc) && soc <= 0.001
+          ? 0
+          : Number.isFinite(nominalV)
+          ? nominalV
+          : 9;
+    }
+
+    if (copy.type === "capacitor") {
+      copy.displayCurrent = "—";
+
+      const capVoltage = Number(copy.capVoltage ?? 0);
+      const vmax = Math.max(0.000001, Number(copy.Vmax ?? 9));
+      const C = Math.max(1e-12, Number(copy.C ?? 0.001));
+
+      const safeVoltage = Number.isFinite(capVoltage) ? capVoltage : 0;
+      const absV = Math.abs(safeVoltage);
+      const percent = Math.max(0, Math.min(1, absV / vmax));
+      const charge = C * absV;
+      const energy = 0.5 * C * absV * absV;
+
+      copy.displayVoltage = Number.isFinite(safeVoltage)
+        ? `${safeVoltage.toFixed(2)}V`
+        : "—";
+      copy.displayCharge = Number.isFinite(charge) ? `${charge.toExponential(2)}C` : "—";
+      copy.displayEnergy = Number.isFinite(energy) ? `${energy.toExponential(2)}J` : "—";
+      copy.displayPercent = `${Math.round(percent * 100)}%`;
     }
 
     return copy;
@@ -264,12 +209,59 @@ function reducer(state, action) {
 
 export function VoltLabProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState);
-const stateRef = useRef(state);
 
-useEffect(() => {
-  stateRef.current = state;
-}, [state]);
+  const stateRef = useRef(state);
   const workspaceElRef = useRef(null);
+useEffect(() => {
+  const raw = localStorage.getItem("voltlab:loadExample");
+  if (!raw) return;
+
+  try {
+    const snap = JSON.parse(raw);
+
+    localStorage.removeItem("voltlab:loadExample");
+
+    if (!snap?.items || !snap?.nodes || !snap?.wires) return;
+
+    dispatch({ type: "SET_RUNNING", running: false });
+    dispatch({ type: "SET_SOLUTION", sol: null });
+    dispatch({ type: "SET_SAFETY_DIALOG", dialog: null });
+
+    dispatch({
+      type: "SET_ITEMS_NODES_WIRES",
+      items: snap.items,
+      nodes: snap.nodes,
+      wires: snap.wires,
+    });
+
+    dispatch({ type: "SET_SELECTED", id: snap.selectedId ?? null });
+   const centeredCam = snap.autoCenter
+  ? {
+      x: Math.round(window.innerWidth / 2),
+      y: Math.round(window.innerHeight / 2),
+      z: snap.cam?.z ?? 0.85,
+    }
+  : snap.cam ?? { x: 0, y: 0, z: 1 };
+
+dispatch({ type: "SET_CAM", cam: centeredCam });
+    dispatch({ type: "SET_MODE", mode: snap.mode ?? "select" });
+
+    dispatch({
+      type: "SET_WIRE_STATE",
+      wire: { startNodeId: null, points: [], previewWorld: null },
+    });
+
+    dispatch({
+      type: "SET_STATUS",
+      text: "Example loaded",
+    });
+  } catch {
+    localStorage.removeItem("voltlab:loadExample");
+  }
+}, []);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   const history = useHistoryCore({
     getSnapshot: () => ({
@@ -308,103 +300,57 @@ useEffect(() => {
     },
   });
 
-  const electricalSignature = useMemo(
-    () => getElectricalSignature(state.items, state.nodes, state.wires),
-    [state.items, state.nodes, state.wires]
-  );
-useEffect(() => {
-  if (!state.running) return;
-
-  let last = performance.now();
-
-  const id = window.setInterval(() => {
-    const now = performance.now();
-    const dtSec = (now - last) / 1000;
-    last = now;
-
-    const s = stateRef.current;
-    if (!s.running) return;
-
-    const { sol, solvedItems } = solveAndApply(s.items, s.nodes, s.wires);
-
-    const withCapacitors = stepCapacitors(
-      solvedItems,
-      s.nodes,
-      s.wires,
-      sol,
-      dtSec
-    );
-
-    dispatch({ type: "SET_SOLUTION", sol });
-
-    dispatch({
-      type: "SET_ITEMS_NODES_WIRES",
-      items: withCapacitors,
-      nodes: s.nodes,
-      wires: s.wires,
-    });
-
-    const warnings = detectCircuitWarnings(
-      withCapacitors,
-      s.nodes,
-      s.wires,
-      sol
-    );
-
-    if (warnings.length > 0 && !s.safetyDialog) {
-      dispatch({
-        type: "SET_SAFETY_DIALOG",
-        dialog: { warnings },
-      });
-    }
-
-    dispatch({
-      type: "SET_STATUS",
-      text: sol?.ok ? "Running" : "Solve failed",
-    });
-  }, 80);
-
-  return () => window.clearInterval(id);
-}, [state.running]);
   useEffect(() => {
     if (!state.running) return;
 
-    const { sol, solvedItems } = solveAndApply(
-      state.items,
-      state.nodes,
-      state.wires
-    );
+    let last = performance.now();
 
-    dispatch({ type: "SET_SOLUTION", sol });
+    const id = window.setInterval(() => {
+      const now = performance.now();
+      const dtSec = (now - last) / 1000;
+      last = now;
 
-    dispatch({
-      type: "SET_ITEMS_NODES_WIRES",
-      items: solvedItems,
-      nodes: state.nodes,
-      wires: state.wires,
-    });
+      const s = stateRef.current;
 
-    const warnings = detectCircuitWarnings(
-      solvedItems,
-      state.nodes,
-      state.wires,
-      sol
-    );
+      if (!s.running) return;
 
-    if (warnings.length > 0 && !state.safetyDialog) {
+      const { sol, solvedItems } = solveAndApply(s.items, s.nodes, s.wires);
+
+     const withStorage = stepPowerStorage(solvedItems, s.nodes, sol, dtSec);
+
+      dispatch({ type: "SET_SOLUTION", sol });
+
       dispatch({
-        type: "SET_SAFETY_DIALOG",
-        dialog: {
-          warnings,
-        },
+        type: "SET_ITEMS_NODES_WIRES",
+        items: withStorage,
+        nodes: s.nodes,
+        wires: s.wires,
       });
-    }
 
-    dispatch({
-      type: "SET_STATUS",
-      text: sol?.ok ? "Running" : "Solve failed",
-    });
-  }, [state.running, electricalSignature]);
+      const warnings = detectCircuitWarnings(
+        withStorage,
+        s.nodes,
+        s.wires,
+        sol
+      );
+
+      if (warnings.length > 0 && !s.safetyDialog) {
+        dispatch({
+          type: "SET_SAFETY_DIALOG",
+          dialog: {
+            warnings,
+          },
+        });
+      }
+
+      dispatch({
+        type: "SET_STATUS",
+        text: sol?.ok ? "Running" : "Solve failed",
+      });
+    }, 80);
+
+    return () => window.clearInterval(id);
+  }, [state.running]);
 
   const actions = useMemo(() => {
     function pushHistory(label) {
@@ -784,31 +730,25 @@ useEffect(() => {
       dispatch({ type: "SET_STATUS", text: "Solving..." });
       dispatch({ type: "SET_SAFETY_DIALOG", dialog: null });
 
-   const { sol, solvedItems } = solveAndApply(
-  state.items,
-  state.nodes,
-  state.wires
-);
+      const { sol, solvedItems } = solveAndApply(
+        state.items,
+        state.nodes,
+        state.wires
+      );
 
-const withCapacitors = stepCapacitors(
-  solvedItems,
-  state.nodes,
-  state.wires,
-  sol,
-  0.08
-);
+     const withStorage = stepPowerStorage(solvedItems, state.nodes, sol, 0.08);
 
       dispatch({ type: "SET_SOLUTION", sol });
 
       dispatch({
         type: "SET_ITEMS_NODES_WIRES",
-        items: solvedItems,
+        items: withStorage,
         nodes: state.nodes,
         wires: state.wires,
       });
 
       const warnings = detectCircuitWarnings(
-        solvedItems,
+        withStorage,
         state.nodes,
         state.wires,
         sol

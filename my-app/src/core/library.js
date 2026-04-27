@@ -1,26 +1,76 @@
 export const LIBRARY = [
   {
     id: "sources",
-    name: "Sources",
-    items: [{ type: "battery", label: "Baterie", icon: "🔋", meta: "V + Rezistență internă", sprite: "assets/sprites/battery.png" }],
+    name: "Surse",
+    items: [
+      {
+        type: "battery",
+        label: "Baterie DC",
+        icon: "🔋",
+        meta: "tensiune + mAh",
+        sprite: "assets/sprites/battery.png",
+      },
+    ],
   },
   {
     id: "passive",
-    name: "Passive",
+    name: "Componente pasive",
     items: [
-  { type: "resistor", label: "Resistor", icon: "R", meta: "Ω bands", sprite: null },
-  { type: "capacitor", label: "Capacitor", icon: "C", meta: "charge", sprite: null },
-  { type: "bulb", label: "Bulb", icon: "💡", meta: "brightness", sprite: null },
-  { type: "switch", label: "Switch", icon: "S", meta: "open/close", sprite: null },
-],
+      {
+        type: "resistor",
+        label: "Rezistor",
+        icon: "R",
+        meta: "Ω + benzi",
+        sprite: null,
+      },
+      {
+        type: "capacitor",
+        label: "Condensator",
+        icon: "C",
+        meta: "F + încărcare",
+        sprite: null,
+      },
+      {
+        type: "bulb",
+        label: "Bec",
+        icon: "💡",
+        meta: "luminozitate",
+        sprite: null,
+      },
+      {
+        type: "switch",
+        label: "Întrerupător",
+        icon: "S",
+        meta: "deschis/închis",
+        sprite: null,
+      },
+    ],
   },
   {
     id: "instruments",
-    name: "Instruments",
+    name: "Aparate de măsură",
     items: [
-      { type: "voltmeter", label: "Voltmetru", icon: "V", meta: "ΔV", sprite: null },
-      { type: "ammeter", label: "Ampermetru", icon: "A", meta: "I", sprite: null },
-      { type: "ohmmeter", label: "Ohmmetru", icon: "Ω", meta: "Req", sprite: null },
+      {
+        type: "voltmeter",
+        label: "Voltmetru",
+        icon: "V",
+        meta: "tensiune",
+        sprite: null,
+      },
+      {
+        type: "ammeter",
+        label: "Ampermetru",
+        icon: "A",
+        meta: "curent",
+        sprite: null,
+      },
+      {
+        type: "ohmmeter",
+        label: "Ohmmetru",
+        icon: "Ω",
+        meta: "rezistență",
+        sprite: null,
+      },
     ],
   },
 ];

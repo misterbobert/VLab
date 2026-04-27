@@ -10,7 +10,7 @@ function parseSIValue(v, fallback = 0) {
   const s = String(v)
     .trim()
     .replace(/\s+/g, "")
-    .replace(/[ΩVAW]/gi, "");
+    .replace(/[ΩVAWAhFJC%]/gi, "");
 
   const m = s.match(/^(-?\d+(?:\.\d+)?)([pnumkMGTµu])?$/);
 
@@ -99,6 +99,7 @@ function isRealLoad(item) {
   return (
     item.type === "resistor" ||
     item.type === "bulb" ||
+    item.type === "capacitor" ||
     item.type === "switch" ||
     item.type === "battery"
   );
@@ -316,7 +317,61 @@ export function detectCircuitWarnings(items, nodes, wires, sol) {
     }
   }
 
-  // 5. Borne inversate la voltmetru / ampermetru
+  // 5. Condensator polarizat conectat invers
+  if (sol?.ok) {
+    for (const item of items) {
+      if (item.type !== "capacitor") continue;
+      if (item.polaritySensitive === false) continue;
+
+      const nets = getItemNets(item, nodes, nodeToNet);
+      if (!nets) continue;
+
+      const va = getNetVoltage(sol, nets.a);
+      const vb = getNetVoltage(sol, nets.b);
+
+      const delta = va - vb;
+
+      if (delta < -0.01) {
+        addWarning(warnings, {
+          title: "Condensatorul este conectat invers",
+          message:
+            "Ai conectat invers un condensator polarizat. Pinul marcat cu plus trebuie să fie la potențial mai mare decât pinul minus. În realitate, un condensator electrolitic pus invers se poate încălzi, umfla sau chiar exploda.",
+          severity: "danger",
+        });
+      }
+    }
+  }
+
+  // 6. Condensator peste tensiunea maximă
+  if (sol?.ok) {
+    for (const item of items) {
+      if (item.type !== "capacitor") continue;
+
+      const vmax = Math.max(0.000001, parseSIValue(item.Vmax, 9));
+      const capVoltage = Math.abs(parseSIValue(item.capVoltage, 0));
+
+      const nets = getItemNets(item, nodes, nodeToNet);
+      let appliedVoltage = capVoltage;
+
+      if (nets) {
+        const va = getNetVoltage(sol, nets.a);
+        const vb = getNetVoltage(sol, nets.b);
+        appliedVoltage = Math.max(appliedVoltage, Math.abs(va - vb));
+      }
+
+      if (appliedVoltage > vmax * 1.05) {
+        addWarning(warnings, {
+          title: "Condensator supratensionat",
+          message:
+            `Condensatorul are limită de ${vmax.toFixed(2)} V, dar pe el apare aproximativ ${appliedVoltage.toFixed(2)} V. ` +
+            "În realitate, depășirea tensiunii maxime poate deteriora condensatorul.",
+          severity: "danger",
+        });
+      }
+    }
+  }
+
+  // 7. Borne inversate la voltmetru / ampermetru
   if (sol?.ok) {
     for (const item of items) {
       if (item.type !== "voltmeter" && item.type !== "ammeter") continue;
@@ -340,7 +395,7 @@ export function detectCircuitWarnings(items, nodes, wires, sol) {
     }
   }
 
-  // 6. Baterii conectate greșit în paralel
+  // 8. Baterii conectate greșit în paralel
   const batteries = items.filter((item) => item.type === "battery");
 
   for (let i = 0; i < batteries.length; i++) {
@@ -381,7 +436,7 @@ export function detectCircuitWarnings(items, nodes, wires, sol) {
     }
   }
 
-  // 7. Plusul și minusul aceleiași baterii ajung legate direct între ele
+  // 9. Plusul și minusul aceleiași baterii ajung legate direct între ele
   for (const battery of batteries) {
     const nets = getItemNets(battery, nodes, nodeToNet);
     if (!nets) continue;

@@ -3,17 +3,15 @@ import { solveMNA } from "./mnaSolver";
 import { formatSI } from "./formatting";
 
 // Parse values that may come as numbers OR formatted SI strings
-// exemple: "1.00MΩ", "200mΩ", "9V"
+// exemple: "1.00MΩ", "200mΩ", "9V", "1000µF"
 function parseSIValue(v) {
   if (typeof v === "number") return v;
   if (v == null) return NaN;
 
   const s = String(v).trim();
 
-  // remove spaces + common units
-  const clean = s.replace(/\s+/g, "").replace(/[ΩVAWAh%]/gi, "");
+  const clean = s.replace(/\s+/g, "").replace(/[ΩVAWAhFJC%]/gi, "");
 
-  // number + optional SI prefix
   const m = clean.match(/^(-?\d+(?:\.\d+)?)([pnumkMGTµu])?$/);
 
   if (!m) {
@@ -81,10 +79,8 @@ function formatSignedValue(value, unit) {
   return sign + formatSI(Math.abs(value), unit);
 }
 
-// Build a net index for each node by connectivity through wires
 function buildNodeToNet(nodes, wires) {
   const nets = computeNets(nodes, wires);
-
   const map = new Map();
 
   nets.forEach((arr, idx) => {
@@ -93,10 +89,12 @@ function buildNodeToNet(nodes, wires) {
     }
   });
 
-  return { nets, nodeToNet: map };
+  return {
+    nets,
+    nodeToNet: map,
+  };
 }
 
-// For each item, we assume 2 pins: node name a / b
 function itemPins(nodes, itemId) {
   const pins = nodes.filter((n) => n.itemId === itemId);
 
@@ -108,7 +106,8 @@ function itemPins(nodes, itemId) {
 
 // Rețea rezistivă pentru ohmmetru.
 // Ohmmetrul NU trebuie să folosească sursele active.
-// De aceea bateria este tratată ca sursă oprită, adică rămâne doar Rint.
+// Bateria este tratată ca sursă oprită, deci rămâne doar Rint.
+// Condensatorul este tratat ca circuit deschis.
 function buildResistanceNetworkForOhmmeter(items, nodes, wires, targetOhmmeterId) {
   const { nodeToNet, nets } = buildNodeToNet(nodes, wires);
 
@@ -167,7 +166,7 @@ function buildResistanceNetworkForOhmmeter(items, nodes, wires, targetOhmmeterId
       });
     }
 
-    // voltmeter / ohmmeter = open circuit
+    // capacitor / voltmeter / ohmmeter = open circuit
   }
 
   return { nodeToNet, nets, resistors };
@@ -207,12 +206,6 @@ function getConnectedResistiveComponent(startNet, resistors, netCount) {
   return seen;
 }
 
-// Calculează rezistența echivalentă între pinii ohmmetrului.
-// Metodă:
-// 1. injectăm un curent de test de 1A
-// 2. calculăm tensiunea rezultată
-// 3. R = U / I
-// Cum I = 1A, rezultă R = U
 function measureOhmmeterResistance(items, nodes, wires, ohmmeterItem) {
   try {
     const { nodeToNet, nets, resistors } = buildResistanceNetworkForOhmmeter(
@@ -230,7 +223,6 @@ function measureOhmmeterResistance(items, nodes, wires, ohmmeterItem) {
 
     if (na == null || nb == null) return null;
 
-    // pinii sunt legați direct pe același nod electric
     if (na === nb) return 0;
 
     const component = getConnectedResistiveComponent(
@@ -239,13 +231,10 @@ function measureOhmmeterResistance(items, nodes, wires, ohmmeterItem) {
       nets.length
     );
 
-    // nu există drum rezistiv între pinii ohmmetrului
     if (!component.has(nb)) {
       return Infinity;
     }
 
-    // Compactăm doar bucata relevantă de circuit.
-    // Asta evită probleme cu matrici singulare din alte circuite neconectate.
     const componentNets = Array.from(component);
     const oldToNew = new Map();
 
@@ -313,10 +302,9 @@ export function solveNormalDC(items, nodes, wires) {
     const currentSources = [];
     const voltageSources = [];
 
-    // Ca să putem afișa curentul prin baterie după solve.
     const batterySourceByItemId = new Map();
+    const capacitorSourceByItemId = new Map();
 
-    // stamps by components
     for (const it of items) {
       const { a, b } = itemPins(nodes, it.id);
       if (!a || !b) continue;
@@ -328,7 +316,12 @@ export function solveNormalDC(items, nodes, wires) {
 
       if (it.type === "resistor") {
         const R = safeResistance(it.R ?? 100, 100);
-        resistors.push({ a: na, b: nb, R });
+
+        resistors.push({
+          a: na,
+          b: nb,
+          R,
+        });
       }
 
       if (it.type === "switch") {
@@ -352,10 +345,7 @@ export function solveNormalDC(items, nodes, wires) {
       }
 
       if (it.type === "battery") {
-        // model: ideal V source in series with Rint
-        const Vraw = parseSIValue(it.V ?? 9);
-        const V = Number.isFinite(Vraw) ? Vraw : 9;
-
+        const V = safeNumber(it.effectiveV ?? it.V ?? 9, 9);
         const Rint = safeResistance(it.Rint ?? 0.2, 0.2);
 
         const sourceIndex = voltageSources.length;
@@ -383,8 +373,43 @@ export function solveNormalDC(items, nodes, wires) {
         });
       }
 
+      if (it.type === "capacitor") {
+        const Vcap = safeNumber(it.capVoltage ?? 0, 0);
+        const ESR = safeResistance(it.ESR ?? 0.5, 0.5);
+
+        // Condensatorul încărcat devine o sursă temporară.
+        // Dacă e aproape gol, îl lăsăm open-circuit.
+        if (Math.abs(Vcap) > 0.001) {
+          const sourceIndex = voltageSources.length;
+          const internal = nodeCount + sourceIndex;
+
+          voltageSources.push({
+            a: na,
+            b: internal,
+            V: Vcap,
+          });
+
+          resistors.push({
+            a: internal,
+            b: nb,
+            R: ESR,
+          });
+
+          capacitorSourceByItemId.set(it.id, {
+            sourceIndex,
+            V: Vcap,
+            ESR,
+            aNet: na,
+            bNet: nb,
+            internalNet: internal,
+          });
+        }
+
+        // Dacă este neîncărcat și conectat la o sursă, încărcarea vizuală
+        // este calculată în useVoltLabStore/powerDynamics.
+      }
+
       if (it.type === "ammeter") {
-        // ammeter = nearly short circuit
         resistors.push({
           a: na,
           b: nb,
@@ -392,7 +417,7 @@ export function solveNormalDC(items, nodes, wires) {
         });
       }
 
-      // voltmeter / ohmmeter don't affect circuit
+      // voltmeter / ohmmeter nu afectează circuitul
     }
 
     const maxNodeIndex =
@@ -402,7 +427,6 @@ export function solveNormalDC(items, nodes, wires) {
         ...voltageSources.map((v) => Math.max(v.a, v.b))
       ) + 1;
 
-    // GMIN: tie all nodes weakly to ground to avoid singular matrices
     const GMIN_R = 1e12;
 
     for (let i = 0; i < maxNodeIndex; i++) {
@@ -441,6 +465,7 @@ export function solveNormalDC(items, nodes, wires) {
       resistors,
       wires,
       batterySourceByItemId,
+      capacitorSourceByItemId,
     };
   } catch (e) {
     return {
@@ -463,12 +488,7 @@ export function applySolutionToItems(items, nodes, sol) {
       ) {
         copy.display = "—";
       }
-if (copy.type === "capacitor") {
-  copy.displayVoltage = "—";
-  copy.displayCharge = "—";
-  copy.displayEnergy = "—";
-  copy.displayPercent = "0%";
-}
+
       if (copy.type === "bulb") {
         copy.brightness = 0;
         copy.displayVoltage = "—";
@@ -479,13 +499,28 @@ if (copy.type === "capacitor") {
       if (copy.type === "battery") {
         copy.displayCurrent = "—";
         copy.displayPower = "—";
+        copy.displayRuntime = "—";
+      }
+
+      if (copy.type === "capacitor") {
+        copy.displayCurrent = "—";
+        copy.displayVoltage = "—";
+        copy.displayCharge = "—";
+        copy.displayEnergy = "—";
+        copy.displayPercent = "0%";
       }
 
       return copy;
     });
   }
 
-  const { nodeToNet, mna, wires, batterySourceByItemId } = sol;
+  const {
+    nodeToNet,
+    mna,
+    wires,
+    batterySourceByItemId,
+    capacitorSourceByItemId,
+  } = sol;
 
   function V(net) {
     return mna?.V?.[net] ?? 0;
@@ -521,10 +556,7 @@ if (copy.type === "capacitor") {
 
       copy.brightness = Math.max(0, Math.min(1, power / Pnom));
     }
-if (it.type === "capacitor") {
-  // condensatorul în regim DC final se comportă ca circuit deschis.
-  // încărcarea/descărcarea vizuală este calculată separat în capacitorDynamics.js
-}
+
     if (copy.type === "battery") {
       const meta = batterySourceByItemId?.get(copy.id);
 
@@ -538,6 +570,19 @@ if (it.type === "capacitor") {
         copy.displayCurrent = "—";
         copy.displayPower = "—";
       }
+    }
+
+    if (copy.type === "capacitor") {
+      const meta = capacitorSourceByItemId?.get(copy.id);
+
+      if (meta) {
+        const current = Math.abs(mna.Ivs?.[meta.sourceIndex] ?? 0);
+        copy.displayCurrent = formatValue(current, "A");
+      } else {
+        copy.displayCurrent = "0.00A";
+      }
+
+      // valorile de tensiune/sarcină/energie sunt actualizate în powerDynamics
     }
 
     if (copy.type === "voltmeter") {

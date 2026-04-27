@@ -61,11 +61,11 @@ function pct(value) {
 function displayName(type) {
   if (type === "battery") return "Baterie";
   if (type === "resistor") return "Rezistor";
+  if (type === "capacitor") return "Condensator";
   if (type === "switch") return "Întrerupător";
   if (type === "bulb") return "Bec";
   if (type === "voltmeter") return "Voltmetru";
   if (type === "ammeter") return "Ampermetru";
-  if (type === "capacitor") return "Condensator";
   if (type === "ohmmeter") return "Ohmmetru";
   return type;
 }
@@ -79,12 +79,11 @@ export default function Inspector() {
   );
 
   return (
-    <aside className="rounded-[22px] border border-white/10 bg-white/5 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.4)]">
-      <div className="mb-3 flex items-center justify-between gap-3">
+  <aside className="min-h-full rounded-[22px] border border-white/10 bg-white/5 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.4)]">    <div className="mb-3 flex items-center justify-between gap-3">
         <div className="text-sm font-semibold">Inspector</div>
 
         <div className="rounded-full border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-white/60">
-          {state.running ? "Running" : "Stopped"}
+          {state.running ? "Rulează" : "Oprit"}
         </div>
       </div>
 
@@ -151,16 +150,22 @@ export default function Inspector() {
             <>
               <Section title="Specificații baterie">
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="Tensiune (V)">
+                  <Field label="Tensiune nominală (V)">
                     <Input
                       type="number"
                       step="0.1"
                       value={selected.V ?? 9}
-                      onChange={(v) =>
+                      onChange={(v) => {
+                        const voltage = clampNumber(v, selected.V ?? 9);
+
                         actions.updateItem(selected.id, {
-                          V: clampNumber(v, selected.V ?? 9),
-                        })
-                      }
+                          V: voltage,
+                          effectiveV:
+                            Number(selected.socPct ?? 100) <= 0.001
+                              ? 0
+                              : voltage,
+                        });
+                      }}
                     />
                   </Field>
 
@@ -168,28 +173,28 @@ export default function Inspector() {
                     <Input
                       type="number"
                       step="0.01"
-                      min="0"
+                      min="0.001"
                       value={selected.Rint ?? 0.2}
                       onChange={(v) =>
                         actions.updateItem(selected.id, {
-                          Rint: clampNumber(v, selected.Rint ?? 0.2, 0),
+                          Rint: clampNumber(v, selected.Rint ?? 0.2, 0.001),
                         })
                       }
                     />
                   </Field>
 
-                  <Field label="Capacitate (Ah)">
+                  <Field label="Capacitate (mAh)">
                     <Input
                       type="number"
-                      step="0.1"
-                      min="0"
-                      value={selected.capacityAh ?? 2}
+                      step="100"
+                      min="1"
+                      value={selected.capacityMah ?? 2000}
                       onChange={(v) =>
                         actions.updateItem(selected.id, {
-                          capacityAh: clampNumber(
+                          capacityMah: clampNumber(
                             v,
-                            selected.capacityAh ?? 2,
-                            0
+                            selected.capacityMah ?? 2000,
+                            1
                           ),
                         })
                       }
@@ -203,12 +208,29 @@ export default function Inspector() {
                       min="0"
                       max="100"
                       value={selected.socPct ?? 100}
-                      onChange={(v) =>
+                      onChange={(v) => {
+                        const soc = clampNumber(v, selected.socPct ?? 100, 0, 100);
+                        const voltage = Number(selected.V ?? 9);
+
                         actions.updateItem(selected.id, {
-                          socPct: clampNumber(v, selected.socPct ?? 100, 0, 100),
+                          socPct: soc,
+                          effectiveV: soc <= 0.001 ? 0 : voltage,
+                        });
+                      }}
+                    />
+                  </Field>
+
+                  <Field label="Consumă bateria">
+                    <button
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm hover:bg-white/10"
+                      onClick={() =>
+                        actions.updateItem(selected.id, {
+                          dischargeEnabled: selected.dischargeEnabled === false,
                         })
                       }
-                    />
+                    >
+                      {selected.dischargeEnabled === false ? "Nu" : "Da"}
+                    </button>
                   </Field>
                 </div>
               </Section>
@@ -223,8 +245,24 @@ export default function Inspector() {
                     label="Putere livrată"
                     value={selected.displayPower ?? "—"}
                   />
+                  <Readout
+                    label="Autonomie estimată"
+                    value={selected.displayRuntime ?? "—"}
+                  />
+                  <Readout
+                    label="Tensiune efectivă"
+                    value={`${Number(selected.effectiveV ?? selected.V ?? 9).toFixed(
+                      2
+                    )}V`}
+                  />
                 </div>
               </Section>
+
+              <div className="rounded-2xl border border-emerald-300/15 bg-emerald-300/10 p-3 text-xs leading-relaxed text-emerald-100/80">
+                Bateria folosește capacitatea în mAh. Când circuitul consumă
+                curent, procentul scade automat. Dacă ajunge la 0%, tensiunea
+                efectivă devine 0V.
+              </div>
             </>
           )}
 
@@ -245,131 +283,148 @@ export default function Inspector() {
               </Field>
             </Section>
           )}
-{selected.type === "capacitor" && (
-  <>
-    <Section title="Specificații condensator">
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Capacitate (µF)">
-          <Input
-            type="number"
-            step="10"
-            min="0.001"
-            value={Math.round((selected.C ?? 0.001) * 1000000)}
-            onChange={(v) =>
-              actions.updateItem(selected.id, {
-                C: Math.max(0.000000001, Number(v) * 0.000001),
-              })
-            }
-          />
-        </Field>
 
-        <Field label="Tensiune maximă (V)">
-          <Input
-            type="number"
-            step="0.1"
-            min="0.1"
-            value={selected.Vmax ?? 9}
-            onChange={(v) =>
-              actions.updateItem(selected.id, {
-                Vmax: clampNumber(v, selected.Vmax ?? 9, 0.1),
-              })
-            }
-          />
-        </Field>
+          {selected.type === "capacitor" && (
+            <>
+              <Section title="Specificații condensator">
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Capacitate (µF)">
+                    <Input
+                      type="number"
+                      step="10"
+                      min="0.001"
+                      value={Math.round((selected.C ?? 0.001) * 1000000)}
+                      onChange={(v) =>
+                        actions.updateItem(selected.id, {
+                          C: Math.max(0.000000001, Number(v) * 0.000001),
+                        })
+                      }
+                    />
+                  </Field>
 
-        <Field label="Timp încărcare (s)">
-          <Input
-            type="number"
-            step="0.1"
-            min="0"
-            value={selected.chargeTimeSec ?? 1.2}
-            onChange={(v) =>
-              actions.updateItem(selected.id, {
-                chargeTimeSec: clampNumber(
-                  v,
-                  selected.chargeTimeSec ?? 1.2,
-                  0
-                ),
-              })
-            }
-          />
-        </Field>
+                  <Field label="Tensiune maximă (V)">
+                    <Input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={selected.Vmax ?? 9}
+                      onChange={(v) =>
+                        actions.updateItem(selected.id, {
+                          Vmax: clampNumber(v, selected.Vmax ?? 9, 0.1),
+                        })
+                      }
+                    />
+                  </Field>
 
-        <Field label="Timp descărcare (s)">
-          <Input
-            type="number"
-            step="0.1"
-            min="0"
-            value={selected.dischargeTimeSec ?? 2}
-            onChange={(v) =>
-              actions.updateItem(selected.id, {
-                dischargeTimeSec: clampNumber(
-                  v,
-                  selected.dischargeTimeSec ?? 2,
-                  0
-                ),
-              })
-            }
-          />
-        </Field>
+                  <Field label="Tensiune actuală (V)">
+                    <Input
+                      type="number"
+                      step="0.1"
+                      value={selected.capVoltage ?? 0}
+                      onChange={(v) =>
+                        actions.updateItem(selected.id, {
+                          capVoltage: clampNumber(v, selected.capVoltage ?? 0),
+                        })
+                      }
+                    />
+                  </Field>
 
-        <Field label="Tensiune inițială (V)">
-          <Input
-            type="number"
-            step="0.1"
-            value={selected.capVoltage ?? 0}
-            onChange={(v) =>
-              actions.updateItem(selected.id, {
-                capVoltage: clampNumber(v, selected.capVoltage ?? 0),
-              })
-            }
-          />
-        </Field>
+                  <Field label="Rezistență internă ESR (Ω)">
+                    <Input
+                      type="number"
+                      step="0.1"
+                      min="0.001"
+                      value={selected.ESR ?? 0.5}
+                      onChange={(v) =>
+                        actions.updateItem(selected.id, {
+                          ESR: clampNumber(v, selected.ESR ?? 0.5, 0.001),
+                        })
+                      }
+                    />
+                  </Field>
 
-        <Field label="Polarizat">
-          <button
-            className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm hover:bg-white/10"
-            onClick={() =>
-              actions.updateItem(selected.id, {
-                polaritySensitive: selected.polaritySensitive === false,
-              })
-            }
-          >
-            {selected.polaritySensitive === false ? "Nu" : "Da"}
-          </button>
-        </Field>
+                  <Field label="Timp încărcare (s)">
+                    <Input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      value={selected.chargeTimeSec ?? 1.2}
+                      onChange={(v) =>
+                        actions.updateItem(selected.id, {
+                          chargeTimeSec: clampNumber(
+                            v,
+                            selected.chargeTimeSec ?? 1.2,
+                            0
+                          ),
+                        })
+                      }
+                    />
+                  </Field>
 
-        <Field label="Pierdere / descărcare">
-          <button
-            className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm hover:bg-white/10"
-            onClick={() =>
-              actions.updateItem(selected.id, {
-                leakageEnabled: selected.leakageEnabled === false,
-              })
-            }
-          >
-            {selected.leakageEnabled === false ? "Oprită" : "Pornită"}
-          </button>
-        </Field>
-      </div>
-    </Section>
+                  <Field label="Timp descărcare (s)">
+                    <Input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      value={selected.dischargeTimeSec ?? 2}
+                      onChange={(v) =>
+                        actions.updateItem(selected.id, {
+                          dischargeTimeSec: clampNumber(
+                            v,
+                            selected.dischargeTimeSec ?? 2,
+                            0
+                          ),
+                        })
+                      }
+                    />
+                  </Field>
 
-    <Section title="Rezultate condensator">
-      <div className="grid grid-cols-2 gap-3">
-        <Readout label="Tensiune" value={selected.displayVoltage ?? "—"} />
-        <Readout label="Încărcare" value={selected.displayPercent ?? "0%"} />
-        <Readout label="Sarcină" value={selected.displayCharge ?? "—"} />
-        <Readout label="Energie" value={selected.displayEnergy ?? "—"} />
-      </div>
-    </Section>
+                  <Field label="Polarizat">
+                    <button
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm hover:bg-white/10"
+                      onClick={() =>
+                        actions.updateItem(selected.id, {
+                          polaritySensitive: selected.polaritySensitive === false,
+                        })
+                      }
+                    >
+                      {selected.polaritySensitive === false ? "Nu" : "Da"}
+                    </button>
+                  </Field>
 
-    <div className="rounded-2xl border border-cyan-300/15 bg-cyan-300/10 p-3 text-xs leading-relaxed text-cyan-100/80">
-      Model didactic: condensatorul este tratat ca circuit deschis în regim DC,
-      iar încărcarea/descărcarea este animată separat în funcție de tensiunea
-      aplicată și timpii setați.
-    </div>
-  </>
-)}
+                  <Field label="Pierdere automată">
+                    <button
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm hover:bg-white/10"
+                      onClick={() =>
+                        actions.updateItem(selected.id, {
+                          leakageEnabled: selected.leakageEnabled === false,
+                        })
+                      }
+                    >
+                      {selected.leakageEnabled === false ? "Oprită" : "Pornită"}
+                    </button>
+                  </Field>
+                </div>
+              </Section>
+
+              <Section title="Rezultate condensator">
+                <div className="grid grid-cols-2 gap-3">
+                  <Readout label="Tensiune" value={selected.displayVoltage ?? "—"} />
+                  <Readout label="Încărcare" value={selected.displayPercent ?? "0%"} />
+                  <Readout label="Curent livrat" value={selected.displayCurrent ?? "—"} />
+                  <Readout label="Sarcină" value={selected.displayCharge ?? "—"} />
+                  <Readout label="Energie" value={selected.displayEnergy ?? "—"} />
+                </div>
+              </Section>
+
+              <div className="rounded-2xl border border-cyan-300/15 bg-cyan-300/10 p-3 text-xs leading-relaxed text-cyan-100/80">
+                Condensatorul încărcat se comportă ca o sursă temporară. Când
+                alimentează un consumator, tensiunea lui scade progresiv, iar
+                umplerea din SVG scade odată cu ea.
+              </div>
+            </>
+          )}
+
           {selected.type === "bulb" && (
             <>
               <Section title="Specificații bec">

@@ -8,6 +8,7 @@ import {
   batterySVG,
   capacitorSVG,
 } from "./renderersSvg";
+
 function rotatePoint(x, y, deg) {
   const r = (deg * Math.PI) / 180;
   const c = Math.cos(r);
@@ -23,13 +24,21 @@ export function defaultPropsForType(type) {
   if (type === "battery") {
     return {
       V: 9,
+      effectiveV: 9,
       Rint: 0.2,
 
-      capacityAh: 2.0,
+      // capacitate baterie în mAh
+      capacityMah: 2000,
+
+      // procent de încărcare
       socPct: 100,
+
+      // dacă e pornit, bateria se descarcă în funcție de consum
+      dischargeEnabled: true,
 
       displayCurrent: "—",
       displayPower: "—",
+      displayRuntime: "—",
 
       sizePct: 100,
       rot: 0,
@@ -43,36 +52,42 @@ export function defaultPropsForType(type) {
       rot: 0,
     };
   }
-if (type === "capacitor") {
-  return {
-    // capacitate în Farazi: 0.001F = 1000µF
-    C: 0.001,
 
-    // tensiunea maximă admisă
-    Vmax: 9,
+  if (type === "capacitor") {
+    return {
+      // capacitate în Farazi: 0.001F = 1000µF
+      C: 0.001,
 
-    // tensiunea actuală memorată pe condensator
-    capVoltage: 0,
+      // tensiune maximă acceptată
+      Vmax: 9,
 
-    // timpi vizuali RC, în secunde
-    chargeTimeSec: 1.2,
-    dischargeTimeSec: 2.0,
+      // tensiunea actuală memorată pe condensator
+      capVoltage: 0,
 
-    // pierdere lentă când nu este alimentat
-    leakageEnabled: true,
+      // rezistență internă pentru descărcare ca sursă
+      ESR: 0.5,
 
-    // pinul a = +, pinul b = -
-    polaritySensitive: true,
+      // timpi vizuali, în secunde
+      chargeTimeSec: 1.2,
+      dischargeTimeSec: 2.0,
 
-    displayVoltage: "—",
-    displayCharge: "—",
-    displayEnergy: "—",
-    displayPercent: "0%",
+      // pierdere lentă când nu e alimentat / nu descarcă pe consumator
+      leakageEnabled: true,
 
-    sizePct: 100,
-    rot: 0,
-  };
-}
+      // pinul a = plus, pinul b = minus
+      polaritySensitive: true,
+
+      displayVoltage: "—",
+      displayCharge: "—",
+      displayEnergy: "—",
+      displayPercent: "0%",
+      displayCurrent: "—",
+
+      sizePct: 100,
+      rot: 0,
+    };
+  }
+
   if (type === "switch") {
     return {
       closed: true,
@@ -83,22 +98,14 @@ if (type === "capacitor") {
 
   if (type === "bulb") {
     return {
-      // model electric simplificat: becul se comportă ca o rezistență
       R: 30,
 
-      // specificații nominale ale becului
       Vnom: 6,
       Pnom: 0.5,
-
-      // compatibilitate cu validatorul vechi, dacă mai apare undeva
       ratedPowerW: 0.5,
 
-      // pentru partea didactică:
-      // pinul "a" este considerat +, pinul "b" este considerat -
-      // dacă îl legi invers, apare avertizare
       polaritySensitive: true,
 
-      // valori calculate după simulare
       brightness: 0,
       displayVoltage: "—",
       displayCurrent: "—",
@@ -229,11 +236,25 @@ export function makeItemWithNodes(type, x, y, props = {}) {
 
 export function renderItemSVG(it) {
   if (it.type === "battery") {
-    return batterySVG(it.V ?? 9, it.Rint ?? 0.2);
+    return batterySVG(
+      it.effectiveV ?? it.V ?? 9,
+      it.Rint ?? 0.2,
+      it.socPct ?? 100,
+      it.capacityMah ?? 2000
+    );
   }
 
   if (it.type === "resistor") {
     return resistorSVG(it.R ?? 100);
+  }
+
+  if (it.type === "capacitor") {
+    return capacitorSVG(
+      it.capVoltage ?? 0,
+      it.Vmax ?? 9,
+      it.C ?? 0.001,
+      it.polaritySensitive !== false
+    );
   }
 
   if (it.type === "voltmeter") {
@@ -255,14 +276,7 @@ export function renderItemSVG(it) {
   if (it.type === "bulb") {
     return bulbSVG(it.brightness || 0);
   }
-if (it.type === "capacitor") {
-  return capacitorSVG(
-    it.capVoltage ?? 0,
-    it.Vmax ?? 9,
-    it.C ?? 0.001,
-    it.polaritySensitive !== false
-  );
-}
+
   return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
     <rect x="10" y="10" width="180" height="100" rx="20"
       fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.15)"/>

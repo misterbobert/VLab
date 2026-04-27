@@ -101,7 +101,6 @@ function getResistorBands(R) {
   const multiplier =
     MULTIPLIER_BANDS[multiplierExp] || { name: "unknown", color: "#64748b" };
 
-  // toleranță standard: aur = ±5%
   const tolerance = { name: "gold", color: "#d4af37" };
 
   return [digit1, digit2, multiplier, tolerance];
@@ -136,60 +135,35 @@ export function resistorSVG(R) {
   const bands = resistorBandRects(R);
 
   return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
-    <rect x="10" y="10" width="180" height="100" rx="20" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
+    <rect x="10" y="10" width="180" height="100" rx="20"
+      fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
 
-    <rect x="52" y="18" width="96" height="34" rx="14" fill="rgba(0,0,0,0.22)" stroke="rgba(255,255,255,0.12)"/>
+    <rect x="52" y="18" width="96" height="34" rx="14"
+      fill="rgba(0,0,0,0.22)" stroke="rgba(255,255,255,0.12)"/>
+
     ${bands}
 
     <path d="M30 68 H60 L70 48 L90 88 L110 48 L130 88 L140 68 H170"
-      fill="none" stroke="rgba(255,255,255,0.88)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+      fill="none" stroke="rgba(255,255,255,0.88)" stroke-width="6"
+      stroke-linecap="round" stroke-linejoin="round"/>
 
-    <text x="100" y="105" text-anchor="middle" font-size="14" fill="rgba(255,255,255,0.75)" font-family="ui-sans-serif,system-ui">${txt}</text>
+    <text x="100" y="105" text-anchor="middle" font-size="14"
+      fill="rgba(255,255,255,0.75)" font-family="ui-sans-serif,system-ui">${txt}</text>
   </svg>`;
 }
 
-export function meterSVG(kind, display) {
-  const label = kind === "voltmeter" ? "V" : kind === "ammeter" ? "A" : "Ω";
-
-  return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
-    <rect x="10" y="10" width="180" height="100" rx="20" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
-    <circle cx="70" cy="60" r="26" fill="rgba(0,0,0,0.25)" stroke="rgba(255,255,255,0.20)"/>
-    <text x="70" y="66" text-anchor="middle" font-size="18" fill="rgba(255,255,255,0.85)" font-family="ui-sans-serif,system-ui">${label}</text>
-    <text x="128" y="66" text-anchor="middle" font-size="18" fill="rgba(255,255,255,0.90)" font-family="ui-sans-serif,system-ui">${display}</text>
-  </svg>`;
-}
-
-export function switchSVG(closed) {
-  return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
-    <rect x="10" y="10" width="180" height="100" rx="20" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
-    <path d="M35 60 H80" stroke="rgba(255,255,255,0.88)" stroke-width="6" stroke-linecap="round"/>
-    <path d="M120 60 H165" stroke="rgba(255,255,255,0.88)" stroke-width="6" stroke-linecap="round"/>
-    ${
-      closed
-        ? `<path d="M80 60 H120" stroke="rgba(120,255,180,0.95)" stroke-width="6" stroke-linecap="round"/>`
-        : `<path d="M80 60 L120 40" stroke="rgba(255,255,255,0.88)" stroke-width="6" stroke-linecap="round"/>`
-    }
-    <text x="100" y="102" text-anchor="middle" font-size="14" fill="rgba(255,255,255,0.65)" font-family="ui-sans-serif,system-ui">${closed ? "closed" : "open"}</text>
-  </svg>`;
-}
-
-export function bulbSVG(brightness01) {
-  const b = Math.max(0, Math.min(1, brightness01 || 0));
-  const glow = 0.15 + b * 0.65;
-
-  return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
-    <rect x="10" y="10" width="180" height="100" rx="20" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
-    <circle cx="100" cy="55" r="26" fill="rgba(255,220,120,${glow})" stroke="rgba(255,255,255,0.22)"/>
-    <path d="M88 82 H112" stroke="rgba(255,255,255,0.75)" stroke-width="6" stroke-linecap="round"/>
-    <text x="100" y="102" text-anchor="middle" font-size="14" fill="rgba(255,255,255,0.65)" font-family="ui-sans-serif,system-ui">${Math.round(b * 100)}%</text>
-  </svg>`;
-}
-export function capacitorSVG(voltage = 0, vmax = 9, capacitance = 0.001, polaritySensitive = true) {
+export function capacitorSVG(
+  voltage = 0,
+  vmax = 9,
+  capacitance = 0.001,
+  polaritySensitive = true
+) {
   const safeVmax = Math.max(0.000001, Number(vmax) || 9);
   const v = Number(voltage) || 0;
   const fill01 = Math.max(0, Math.min(1, Math.abs(v) / safeVmax));
+
   const fillH = 62 * fill01;
-  const fillY = 82 - fillH;
+  const fillY = 84 - fillH;
 
   const cText = formatSI(capacitance, "F");
   const vText = `${v.toFixed(2)}V`;
@@ -202,12 +176,22 @@ export function capacitorSVG(voltage = 0, vmax = 9, capacitance = 0.001, polarit
       ? "rgba(56,189,248,0.78)"
       : "rgba(125,211,252,0.58)";
 
+  const reverseWarning =
+    polaritySensitive && v < -0.01
+      ? `<text x="100" y="18" text-anchor="middle" font-size="10"
+          fill="rgba(251,113,133,0.95)" font-family="ui-sans-serif,system-ui">polaritate inversă</text>`
+      : "";
+
   return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
     <rect x="10" y="10" width="180" height="100" rx="20"
       fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
 
-    <path d="M28 60 H68" stroke="rgba(255,255,255,0.80)" stroke-width="6" stroke-linecap="round"/>
-    <path d="M132 60 H172" stroke="rgba(255,255,255,0.80)" stroke-width="6" stroke-linecap="round"/>
+    ${reverseWarning}
+
+    <path d="M28 60 H67" stroke="rgba(255,255,255,0.80)"
+      stroke-width="6" stroke-linecap="round"/>
+    <path d="M133 60 H172" stroke="rgba(255,255,255,0.80)"
+      stroke-width="6" stroke-linecap="round"/>
 
     <rect x="72" y="20" width="56" height="68" rx="12"
       fill="rgba(0,0,0,0.26)" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
@@ -219,31 +203,111 @@ export function capacitorSVG(voltage = 0, vmax = 9, capacitance = 0.001, polarit
     <rect x="76" y="${fillY}" width="48" height="${fillH}" rx="9"
       fill="${fillColor}" clip-path="url(#capFillClip)"/>
 
-    <path d="M86 34 H114" stroke="rgba(255,255,255,0.75)" stroke-width="5" stroke-linecap="round"/>
-    <path d="M86 74 H114" stroke="rgba(255,255,255,0.75)" stroke-width="5" stroke-linecap="round"/>
+    <path d="M86 36 H114" stroke="rgba(255,255,255,0.78)"
+      stroke-width="5" stroke-linecap="round"/>
+    <path d="M86 72 H114" stroke="rgba(255,255,255,0.78)"
+      stroke-width="5" stroke-linecap="round"/>
 
-    <text x="64" y="38" text-anchor="middle" font-size="12"
+    <text x="62" y="40" text-anchor="middle" font-size="12"
       fill="rgba(255,255,255,0.75)" font-family="ui-sans-serif,system-ui">${polaritySensitive ? "+" : "~"}</text>
 
-    <text x="136" y="38" text-anchor="middle" font-size="12"
+    <text x="138" y="40" text-anchor="middle" font-size="12"
       fill="rgba(255,255,255,0.75)" font-family="ui-sans-serif,system-ui">${polaritySensitive ? "−" : "~"}</text>
 
-    <text x="100" y="100" text-anchor="middle" font-size="12"
+    <text x="100" y="101" text-anchor="middle" font-size="12"
       fill="rgba(255,255,255,0.72)" font-family="ui-sans-serif,system-ui">${cText} · ${pctText}</text>
 
-    <text x="100" y="113" text-anchor="middle" font-size="10"
+    <text x="100" y="114" text-anchor="middle" font-size="10"
       fill="rgba(255,255,255,0.50)" font-family="ui-sans-serif,system-ui">${vText}</text>
   </svg>`;
 }
-export function batterySVG(V, Rint) {
-  const a = formatSI(V, "V");
-  const b = formatSI(Rint, "Ω");
+
+export function meterSVG(kind, display) {
+  const label = kind === "voltmeter" ? "V" : kind === "ammeter" ? "A" : "Ω";
 
   return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
-    <rect x="10" y="10" width="180" height="100" rx="20" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
-    <rect x="55" y="40" width="90" height="40" rx="10" fill="rgba(0,0,0,0.25)" stroke="rgba(255,255,255,0.18)"/>
-    <rect x="145" y="52" width="10" height="16" rx="3" fill="rgba(255,255,255,0.30)"/>
-    <text x="100" y="66" text-anchor="middle" font-size="14" fill="rgba(255,255,255,0.85)" font-family="ui-sans-serif,system-ui">${a}</text>
-    <text x="100" y="98" text-anchor="middle" font-size="12" fill="rgba(255,255,255,0.65)" font-family="ui-sans-serif,system-ui">Rint ${b}</text>
+    <rect x="10" y="10" width="180" height="100" rx="20"
+      fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
+    <circle cx="70" cy="60" r="26" fill="rgba(0,0,0,0.25)"
+      stroke="rgba(255,255,255,0.20)"/>
+    <text x="70" y="66" text-anchor="middle" font-size="18"
+      fill="rgba(255,255,255,0.85)" font-family="ui-sans-serif,system-ui">${label}</text>
+    <text x="128" y="66" text-anchor="middle" font-size="18"
+      fill="rgba(255,255,255,0.90)" font-family="ui-sans-serif,system-ui">${display}</text>
+  </svg>`;
+}
+
+export function switchSVG(closed) {
+  return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+    <rect x="10" y="10" width="180" height="100" rx="20"
+      fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
+    <path d="M35 60 H80" stroke="rgba(255,255,255,0.88)"
+      stroke-width="6" stroke-linecap="round"/>
+    <path d="M120 60 H165" stroke="rgba(255,255,255,0.88)"
+      stroke-width="6" stroke-linecap="round"/>
+    ${
+      closed
+        ? `<path d="M80 60 H120" stroke="rgba(120,255,180,0.95)" stroke-width="6" stroke-linecap="round"/>`
+        : `<path d="M80 60 L120 40" stroke="rgba(255,255,255,0.88)" stroke-width="6" stroke-linecap="round"/>`
+    }
+    <text x="100" y="102" text-anchor="middle" font-size="14"
+      fill="rgba(255,255,255,0.65)" font-family="ui-sans-serif,system-ui">${closed ? "închis" : "deschis"}</text>
+  </svg>`;
+}
+
+export function bulbSVG(brightness01) {
+  const b = Math.max(0, Math.min(1, brightness01 || 0));
+  const glow = 0.15 + b * 0.65;
+
+  return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+    <rect x="10" y="10" width="180" height="100" rx="20"
+      fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
+    <circle cx="100" cy="55" r="26" fill="rgba(255,220,120,${glow})"
+      stroke="rgba(255,255,255,0.22)"/>
+    <path d="M88 82 H112" stroke="rgba(255,255,255,0.75)"
+      stroke-width="6" stroke-linecap="round"/>
+    <text x="100" y="102" text-anchor="middle" font-size="14"
+      fill="rgba(255,255,255,0.65)" font-family="ui-sans-serif,system-ui">${Math.round(b * 100)}%</text>
+  </svg>`;
+}
+
+export function batterySVG(V, Rint, socPct = 100, capacityMah = 2000) {
+  const a = formatSI(V, "V");
+  const b = formatSI(Rint, "Ω");
+  const pct = Math.max(0, Math.min(100, Number(socPct) || 0));
+  const fillW = 82 * (pct / 100);
+  const mahText = `${Math.round(Number(capacityMah) || 0)}mAh`;
+
+  const fillColor =
+    pct <= 15
+      ? "rgba(248,113,113,0.88)"
+      : pct <= 35
+      ? "rgba(251,191,36,0.88)"
+      : "rgba(74,222,128,0.82)";
+
+  return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+    <rect x="10" y="10" width="180" height="100" rx="20"
+      fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
+
+    <rect x="55" y="36" width="90" height="44" rx="10"
+      fill="rgba(0,0,0,0.25)" stroke="rgba(255,255,255,0.18)"/>
+    <rect x="145" y="50" width="10" height="16" rx="3"
+      fill="rgba(255,255,255,0.30)"/>
+
+    <clipPath id="batClip">
+      <rect x="59" y="40" width="82" height="36" rx="7"/>
+    </clipPath>
+
+    <rect x="59" y="40" width="${fillW}" height="36" rx="7"
+      fill="${fillColor}" clip-path="url(#batClip)"/>
+
+    <text x="100" y="62" text-anchor="middle" font-size="14"
+      fill="rgba(255,255,255,0.92)" font-family="ui-sans-serif,system-ui">${a}</text>
+
+    <text x="100" y="95" text-anchor="middle" font-size="11"
+      fill="rgba(255,255,255,0.65)" font-family="ui-sans-serif,system-ui">${Math.round(pct)}% · ${mahText}</text>
+
+    <text x="100" y="108" text-anchor="middle" font-size="10"
+      fill="rgba(255,255,255,0.45)" font-family="ui-sans-serif,system-ui">Rint ${b}</text>
   </svg>`;
 }
