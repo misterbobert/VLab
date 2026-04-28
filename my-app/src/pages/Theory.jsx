@@ -1,473 +1,471 @@
 import React from "react";
-import { Link } from "react-router-dom";
 
-function Pill({ children }) {
-  return (
-    <span className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs font-semibold text-cyan-100">
-      {children}
-    </span>
-  );
-}
-
-function Formula({ children }) {
-  return (
-    <div className="mt-3 rounded-2xl border border-white/10 bg-black/30 px-4 py-3 font-mono text-sm text-cyan-100 shadow-inner">
-      {children}
-    </div>
-  );
-}
-
-function SectionCard({ id, eyebrow, title, children }) {
+function Section({ id, title, children }) {
   return (
     <section
       id={id}
-      className="scroll-mt-24 rounded-[28px] border border-white/10 bg-white/[0.045] p-6 shadow-[0_18px_60px_rgba(0,0,0,0.35)] backdrop-blur"
+      className="scroll-mt-28 rounded-[26px] border border-white/10 bg-white/[0.04] p-5 shadow-[0_18px_50px_rgba(0,0,0,0.25)]"
     >
-      <div className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-cyan-200/70">
-        {eyebrow}
-      </div>
-      <h2 className="text-2xl font-bold tracking-tight text-white">{title}</h2>
-      <div className="mt-4 space-y-4 text-sm leading-7 text-white/72">
+      <h2 className="text-xl font-bold text-white">{title}</h2>
+      <div className="mt-3 space-y-3 text-sm leading-relaxed text-white/72">
         {children}
       </div>
     </section>
   );
 }
 
-function MiniCard({ title, children, accent = "cyan" }) {
-  const color =
-    accent === "rose"
-      ? "border-rose-300/20 bg-rose-300/10 text-rose-100"
-      : accent === "amber"
-      ? "border-amber-300/20 bg-amber-300/10 text-amber-100"
-      : accent === "emerald"
-      ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
-      : "border-cyan-300/20 bg-cyan-300/10 text-cyan-100";
-
+function Formula({ children }) {
   return (
-    <div className={`rounded-2xl border p-4 ${color}`}>
-      <div className="font-semibold">{title}</div>
-      <div className="mt-2 text-sm leading-6 opacity-85">{children}</div>
+    <div className="my-3 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 px-4 py-3 text-center font-mono text-base text-cyan-100">
+      {children}
     </div>
   );
 }
 
-function JumpButton({ href, children }) {
+function Example({ children }) {
   return (
-    <a
-      href={href}
-      className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white/80 transition hover:border-cyan-300/30 hover:bg-cyan-300/10 hover:text-cyan-100"
-    >
+    <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-sm text-amber-100/85">
       {children}
-    </a>
+    </div>
   );
 }
+
+function CompareRow({ left, right }) {
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      <div className="rounded-2xl border border-sky-300/15 bg-sky-300/10 p-4">
+        {left}
+      </div>
+      <div className="rounded-2xl border border-emerald-300/15 bg-emerald-300/10 p-4">
+        {right}
+      </div>
+    </div>
+  );
+}
+
+const menuItems = [
+  ["intro", "Circuitul electric"],
+  ["apa", "Analogia cu apa"],
+  ["tensiune", "Tensiunea"],
+  ["curent", "Curentul"],
+  ["rezistenta", "Rezistența"],
+  ["ohm", "Legea lui Ohm"],
+  ["putere", "Puterea"],
+  ["baterie", "Bateria reală"],
+  ["bec", "Becul"],
+  ["serie", "Serie"],
+  ["paralel", "Paralel"],
+  ["scurtcircuit", "Scurtcircuit"],
+  ["voltmetru", "Voltmetrul"],
+  ["ampermetru", "Ampermetrul"],
+  ["ohmmetru", "Ohmmetrul"],
+  ["noduri", "Noduri și fire"],
+  ["kirchhoff", "Kirchhoff"],
+  ["simulator", "În simulator"],
+];
 
 export default function Theory() {
   return (
     <div className="min-h-[calc(100vh-56px)] bg-[#0b0f17] text-white">
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute left-[-10%] top-[-10%] h-[420px] w-[420px] rounded-full bg-cyan-500/10 blur-[90px]" />
-        <div className="absolute bottom-[-12%] right-[-8%] h-[520px] w-[520px] rounded-full bg-blue-500/10 blur-[100px]" />
-      </div>
-
-     <main className="relative mx-auto max-w-7xl px-5 pt-20 pb-10 sm:px-6 lg:px-8">
-        <section className="overflow-hidden rounded-[34px] border border-white/10 bg-white/[0.045] shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
-        
-         <div className="grid gap-8 p-7 lg:grid-cols-[1.2fr_0.8fr] lg:p-10">
-            <div>
-              <div className="flex flex-wrap gap-2">
-                <Pill>VoltLab Theory</Pill>
-                <Pill>Circuite electrice</Pill>
-                <Pill>Explicații rapide</Pill>
-              </div>
-
-              <h1 className="mt-5 max-w-3xl text-4xl font-black tracking-tight text-white sm:text-5xl">
-                Înțelege ce se întâmplă în circuit, nu doar conecta fire.
-              </h1>
-
-              <p className="mt-5 max-w-3xl text-base leading-8 text-white/70">
-                Aici găsești teoria din spatele componentelor din VoltLab:
-                baterii, rezistori, becuri, condensatori și aparate de măsură.
-                Pagina este făcută ca un ghid rapid: citești ideea, vezi formula
-                și apoi testezi direct în laborator.
-              </p>
-
-              <div className="mt-7 flex flex-wrap gap-3">
-                <Link
-                  to="/"
-                  className="rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"
-                >
-                  Înapoi la laborator
-                </Link>
-
-                <a
-                  href="#greseli"
-                  className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-bold text-white/85 transition hover:bg-white/10"
-                >
-                  Vezi greșeli frecvente
-                </a>
-              </div>
-            </div>
-
-            <div className="rounded-[28px] border border-white/10 bg-black/20 p-5">
-              <div className="text-sm font-semibold text-white/80">
-                Navigare rapidă
-              </div>
-
-              <div className="mt-4 grid gap-3">
-                <JumpButton href="#marimi">Mărimi electrice</JumpButton>
-                <JumpButton href="#ohm">Legea lui Ohm</JumpButton>
-                <JumpButton href="#baterie">Baterie</JumpButton>
-                <JumpButton href="#rezistor">Rezistor</JumpButton>
-                <JumpButton href="#bec">Bec</JumpButton>
-                <JumpButton href="#condensator">Condensator</JumpButton>
-                <JumpButton href="#masuratori">Aparate de măsură</JumpButton>
-                <JumpButton href="#mna">Cum calculează VoltLab</JumpButton>
-              </div>
-            </div>
+      <div className="mx-auto max-w-7xl px-6 pb-10 pt-24">
+        <div className="mb-8 rounded-[30px] border border-white/10 bg-gradient-to-br from-cyan-400/10 via-white/[0.04] to-indigo-500/10 p-6">
+          <div className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-200/70">
+            VoltLab Theory
           </div>
-        </section>
 
-        <div className="mt-8 grid gap-6 lg:grid-cols-[260px_1fr]">
-          <aside className="hidden h-fit rounded-[28px] border border-white/10 bg-white/[0.04] p-4 lg:sticky lg:top-24 lg:block">
-            <div className="mb-3 px-2 text-xs font-bold uppercase tracking-[0.2em] text-white/45">
-              Capitole
+          <h1 className="mt-3 text-3xl font-black tracking-tight md:text-4xl">
+            Noțiuni de bază despre circuite electrice
+          </h1>
+
+          <p className="mt-4 max-w-3xl text-base leading-relaxed text-white/70">
+            Electricitatea poate părea abstractă, pentru că nu o vedem direct.
+            De aceea, o putem compara cu apa care curge prin țevi. Această
+            comparație nu este perfectă, dar ajută foarte mult la înțelegerea
+            tensiunii, curentului și rezistenței.
+          </p>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
+          <aside className="hidden lg:block">
+            <div className="sticky top-24 rounded-[24px] border border-white/10 bg-white/[0.04] p-4">
+              <div className="mb-3 text-sm font-bold text-white">
+                Cuprins teorie
+              </div>
+
+              <nav className="max-h-[calc(100vh-150px)] space-y-1 overflow-auto pr-1">
+                {menuItems.map(([id, label], index) => (
+                  <a
+                    key={id}
+                    href={`#${id}`}
+                    className="block rounded-xl px-3 py-2 text-sm text-white/65 transition hover:bg-white/10 hover:text-white"
+                  >
+                    <span className="mr-2 text-white/30">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    {label}
+                  </a>
+                ))}
+              </nav>
             </div>
-
-            <nav className="grid gap-2">
-              {[
-                ["#marimi", "Mărimi electrice"],
-                ["#ohm", "Legea lui Ohm"],
-                ["#baterie", "Baterie"],
-                ["#rezistor", "Rezistor"],
-                ["#bec", "Bec"],
-                ["#condensator", "Condensator"],
-                ["#masuratori", "Măsurători"],
-                ["#greseli", "Greșeli frecvente"],
-                ["#mna", "MNA"],
-              ].map(([href, label]) => (
-                <a
-                  key={href}
-                  href={href}
-                  className="rounded-2xl px-3 py-2 text-sm text-white/65 transition hover:bg-cyan-300/10 hover:text-cyan-100"
-                >
-                  {label}
-                </a>
-              ))}
-            </nav>
           </aside>
 
-          <div className="space-y-6">
-            <SectionCard
-              id="marimi"
-              eyebrow="01 · bază"
-              title="Mărimi electrice importante"
-            >
-              <p>
-                Într-un circuit electric, cele mai importante mărimi sunt
-                tensiunea, curentul, rezistența și puterea. Dacă le înțelegi pe
-                acestea, poți interpreta aproape orice circuit simplu.
-              </p>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <MiniCard title="Tensiunea — U sau V">
-                  Tensiunea arată diferența de potențial dintre două puncte.
-                  Intuitiv, este „forța” cu care sursa împinge sarcinile prin
-                  circuit.
-                </MiniCard>
-
-                <MiniCard title="Curentul — I">
-                  Curentul arată câtă sarcină electrică trece printr-un punct
-                  într-o secundă. Se măsoară în amperi.
-                </MiniCard>
-
-                <MiniCard title="Rezistența — R">
-                  Rezistența se opune trecerii curentului. Cu cât rezistența e
-                  mai mare, cu atât curentul devine mai mic.
-                </MiniCard>
-
-                <MiniCard title="Puterea — P">
-                  Puterea arată câtă energie se consumă pe secundă. Un bec cu
-                  putere mai mare poate lumina mai tare, dar consumă mai mult.
-                </MiniCard>
+          <main className="space-y-5">
+            <div className="lg:hidden rounded-[24px] border border-white/10 bg-white/[0.04] p-4">
+              <div className="mb-3 text-sm font-bold text-white">
+                Cuprins teorie
               </div>
 
-              <Formula>U = tensiune · I = curent · R = rezistență · P = putere</Formula>
-            </SectionCard>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {menuItems.map(([id, label]) => (
+                  <a
+                    key={id}
+                    href={`#${id}`}
+                    className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/70 hover:bg-white/10 hover:text-white"
+                  >
+                    {label}
+                  </a>
+                ))}
+              </div>
+            </div>
 
-            <SectionCard
-              id="ohm"
-              eyebrow="02 · lege fundamentală"
-              title="Legea lui Ohm"
-            >
+            <Section id="intro" title="1. Circuitul electric, pe scurt">
               <p>
-                Legea lui Ohm spune că tensiunea pe un rezistor este egală cu
-                produsul dintre rezistență și curent. Este una dintre cele mai
-                folosite relații din electricitate.
+                Un circuit electric este un drum închis prin care se pot deplasa
+                sarcinile electrice. Ca să circule curent, circuitul trebuie să
+                aibă o sursă de energie, cum ar fi o baterie, conductoare de
+                legătură și unul sau mai mulți consumatori, cum ar fi un bec sau
+                un rezistor.
+              </p>
+
+              <p>
+                Dacă drumul este întrerupt, curentul nu mai are pe unde să
+                circule. De aceea, un întrerupător deschis oprește circuitul,
+                iar un întrerupător închis permite trecerea curentului.
+              </p>
+
+              <Example>
+                Gândește-te la un circuit ca la un traseu pentru apă. Dacă țeava
+                este completă, apa curge. Dacă țeava este tăiată sau robinetul
+                este închis, apa se oprește.
+              </Example>
+            </Section>
+
+            <Section id="apa" title="2. Analogia cu apa">
+              <CompareRow
+                left={
+                  <>
+                    <h3 className="font-semibold text-sky-100">
+                      Circuit cu apă
+                    </h3>
+                    <p className="mt-2 text-white/70">
+                      Pompa împinge apa prin țevi. Dacă presiunea este mai mare,
+                      apa are tendința să curgă mai puternic. Țevile înguste
+                      opun rezistență și limitează debitul apei.
+                    </p>
+                  </>
+                }
+                right={
+                  <>
+                    <h3 className="font-semibold text-emerald-100">
+                      Circuit electric
+                    </h3>
+                    <p className="mt-2 text-white/70">
+                      Bateria împinge sarcinile electrice prin conductoare.
+                      Tensiunea este asemănătoare cu presiunea, curentul este
+                      asemănător cu debitul, iar rezistența este asemănătoare cu
+                      îngustarea țevii.
+                    </p>
+                  </>
+                }
+              />
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                  <div className="text-sm font-bold text-cyan-100">
+                    Tensiunea U
+                  </div>
+                  <p className="mt-2">
+                    Este ca presiunea apei. Cu cât tensiunea este mai mare, cu
+                    atât sursa împinge mai puternic sarcinile electrice.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                  <div className="text-sm font-bold text-cyan-100">
+                    Curentul I
+                  </div>
+                  <p className="mt-2">
+                    Este ca debitul apei. Arată câtă sarcină electrică trece
+                    printr-un punct al circuitului într-o secundă.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                  <div className="text-sm font-bold text-cyan-100">
+                    Rezistența R
+                  </div>
+                  <p className="mt-2">
+                    Este ca o țeavă mai îngustă. Cu cât rezistența este mai
+                    mare, cu atât curentul trece mai greu.
+                  </p>
+                </div>
+              </div>
+            </Section>
+
+            <Section id="tensiune" title="3. Tensiunea electrică">
+              <p>
+                Tensiunea electrică se notează cu <b>U</b> și se măsoară în{" "}
+                <b>volți</b>, adică <b>V</b>. Ea arată câtă energie primește o
+                sarcină electrică pentru a se deplasa prin circuit.
+              </p>
+
+              <p>
+                Într-o explicație simplă, tensiunea este „forța de împingere” a
+                bateriei. O baterie de 9V împinge mai puternic sarcinile decât o
+                baterie de 1.5V.
+              </p>
+
+              <Formula>U = tensiune electrică, unitate: volt (V)</Formula>
+            </Section>
+
+            <Section id="curent" title="4. Intensitatea curentului electric">
+              <p>
+                Intensitatea curentului electric se notează cu <b>I</b> și se
+                măsoară în <b>amperi</b>, adică <b>A</b>. Ea arată cât de multă
+                sarcină electrică trece printr-un conductor într-un anumit timp.
+              </p>
+
+              <p>
+                În analogia cu apa, curentul este ca debitul: câtă apă trece
+                prin țeavă într-o secundă. Dacă trece multă apă, debitul e mare.
+                Dacă trece multă sarcină electrică, curentul e mare.
+              </p>
+
+              <Formula>I = intensitatea curentului, unitate: amper (A)</Formula>
+            </Section>
+
+            <Section id="rezistenta" title="5. Rezistența electrică">
+              <p>
+                Rezistența electrică se notează cu <b>R</b> și se măsoară în{" "}
+                <b>ohmi</b>, adică <b>Ω</b>. Ea arată cât de mult se opune o
+                componentă trecerii curentului electric.
+              </p>
+
+              <p>
+                Un rezistor este o componentă făcută special ca să limiteze
+                curentul. Cu cât rezistența este mai mare, cu atât curentul este
+                mai mic, dacă tensiunea rămâne aceeași.
+              </p>
+
+              <Formula>R = rezistență electrică, unitate: ohm (Ω)</Formula>
+            </Section>
+
+            <Section id="ohm" title="6. Legea lui Ohm">
+              <p>
+                Legea lui Ohm este una dintre cele mai importante formule din
+                electricitate. Ea leagă tensiunea, curentul și rezistența.
               </p>
 
               <Formula>U = R · I</Formula>
 
-              <div className="grid gap-4 md:grid-cols-3">
-                <MiniCard title="Dacă R crește">
-                  Curentul scade, dacă tensiunea rămâne aceeași.
-                </MiniCard>
+              <p>Din această formulă putem scoate și celelalte două forme:</p>
 
-                <MiniCard title="Dacă U crește">
-                  Curentul crește, dacă rezistența rămâne aceeași.
-                </MiniCard>
-
-                <MiniCard title="Dacă I e mare">
-                  Componentele se pot încălzi sau deteriora.
-                </MiniCard>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Formula>I = U / R</Formula>
+                <Formula>R = U / I</Formula>
               </div>
-            </SectionCard>
 
-            <SectionCard
-              id="baterie"
-              eyebrow="03 · sursă de energie"
-              title="Bateria"
-            >
+              <Example>
+                Dacă ai o baterie de 9V și un rezistor de 100Ω, curentul este:
+                I = 9 / 100 = 0.09A. Adică 90mA.
+              </Example>
+            </Section>
+
+            <Section id="putere" title="7. Puterea electrică">
               <p>
-                Bateria este o sursă de tensiune. În VoltLab, bateria are
-                tensiune nominală, rezistență internă, capacitate în mAh și
-                procent de încărcare.
+                Puterea electrică arată cât de repede se consumă sau se
+                transformă energia electrică. Se notează cu <b>P</b> și se
+                măsoară în <b>wați</b>, adică <b>W</b>.
               </p>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <MiniCard title="Tensiunea nominală">
-                  Este valoarea setată în Inspector, de exemplu 9V. Aceasta
-                  decide cât de mult poate alimenta circuitul.
-                </MiniCard>
-
-                <MiniCard title="Capacitatea în mAh">
-                  Arată cât curent poate oferi bateria în timp. O baterie de
-                  2000mAh ține mai mult decât una de 100mAh.
-                </MiniCard>
-
-                <MiniCard title="Procentul bateriei">
-                  În simulator, procentul scade în funcție de consumatori. Când
-                  procentul scade, tensiunea efectivă scade și ea.
-                </MiniCard>
-
-                <MiniCard title="Rezistența internă">
-                  Orice baterie reală are o rezistență internă. Aceasta limitează
-                  curentul și influențează puterea livrată.
-                </MiniCard>
-              </div>
-
-              <Formula>capacitate folosită ≈ I · timp</Formula>
-            </SectionCard>
-
-            <SectionCard
-              id="rezistor"
-              eyebrow="04 · componentă pasivă"
-              title="Rezistorul"
-            >
-              <p>
-                Rezistorul limitează curentul într-un circuit. În VoltLab poți
-                modifica valoarea rezistenței, iar benzile colorate de pe
-                componentă se schimbă automat.
-              </p>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <MiniCard title="Rol principal">
-                  Reduce curentul și protejează componentele sensibile.
-                </MiniCard>
-
-                <MiniCard title="Codul culorilor">
-                  Benzile colorate reprezintă cifrele și multiplicatorul
-                  valorii rezistenței.
-                </MiniCard>
-              </div>
-
-              <Formula>Exemplu: 220Ω = roșu · roșu · maro · auriu</Formula>
-            </SectionCard>
-
-            <SectionCard id="bec" eyebrow="05 · consumator" title="Becul">
-              <p>
-                Becul este tratat în VoltLab ca o rezistență care transformă
-                energia electrică în lumină. Luminozitatea depinde de puterea
-                primită.
-              </p>
-
-              <div className="grid gap-4 md:grid-cols-3">
-                <MiniCard title="Putere mică">
-                  Becul luminează slab sau deloc.
-                </MiniCard>
-
-                <MiniCard title="Putere potrivită">
-                  Becul luminează normal, aproape de valoarea nominală.
-                </MiniCard>
-
-                <MiniCard title="Putere prea mare" accent="rose">
-                  Apare avertizare de suprasolicitare. În realitate, becul s-ar
-                  putea arde.
-                </MiniCard>
-              </div>
 
               <Formula>P = U · I</Formula>
-              <Formula>P = U² / R</Formula>
-            </SectionCard>
-
-            <SectionCard
-              id="condensator"
-              eyebrow="06 · stocare temporară"
-              title="Condensatorul"
-            >
-              <p>
-                Condensatorul stochează energie electrică. În VoltLab se poate
-                încărca de la o baterie și apoi se poate descărca printr-un
-                consumator, de exemplu printr-un bec.
-              </p>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <MiniCard title="Capacitatea — C">
-                  Capacitatea se măsoară în farazi. În Inspector o modifici în
-                  µF, pentru că valorile uzuale sunt mici.
-                </MiniCard>
-
-                <MiniCard title="Tensiunea maximă — Vmax">
-                  Este limita admisă. Dacă tensiunea depășește această valoare,
-                  apare avertizare de supratensiune.
-                </MiniCard>
-
-                <MiniCard title="Încărcare">
-                  Când îl conectezi la baterie, se încarcă progresiv spre
-                  tensiunea sursei.
-                </MiniCard>
-
-                <MiniCard title="Descărcare">
-                  Când alimentează un consumator, tensiunea scade progresiv, iar
-                  umplerea din SVG scade odată cu ea.
-                </MiniCard>
-              </div>
-
-              <Formula>Q = C · U</Formula>
-              <Formula>E = 1/2 · C · U²</Formula>
-            </SectionCard>
-
-            <SectionCard
-              id="masuratori"
-              eyebrow="07 · instrumente"
-              title="Aparate de măsură"
-            >
-              <p>
-                Voltmetrul, ampermetrul și ohmmetrul trebuie conectate corect.
-                Dacă sunt puse greșit, simulatorul afișează o fereastră cu
-                explicația problemei.
-              </p>
-
-              <div className="grid gap-4 md:grid-cols-3">
-                <MiniCard title="Voltmetru" accent="cyan">
-                  Se conectează în paralel cu elementul pe care vrei să măsori
-                  tensiunea.
-                </MiniCard>
-
-                <MiniCard title="Ampermetru" accent="amber">
-                  Se conectează în serie cu circuitul. Dacă îl pui în paralel,
-                  poate produce scurtcircuit.
-                </MiniCard>
-
-                <MiniCard title="Ohmmetru" accent="emerald">
-                  Se folosește pentru rezistență, ideal fără surse active în
-                  circuit.
-                </MiniCard>
-              </div>
-            </SectionCard>
-
-            <SectionCard
-              id="greseli"
-              eyebrow="08 · avertizări"
-              title="Greșeli frecvente detectate de VoltLab"
-            >
-              <div className="grid gap-4 md:grid-cols-2">
-                <MiniCard title="Ampermetru în paralel" accent="rose">
-                  Ampermetrul are rezistență foarte mică. Dacă îl pui în paralel
-                  cu o componentă, poate scurtcircuita circuitul.
-                </MiniCard>
-
-                <MiniCard title="Voltmetru în serie" accent="amber">
-                  Voltmetrul are rezistență foarte mare. Dacă îl pui în serie,
-                  circuitul devine aproape întrerupt.
-                </MiniCard>
-
-                <MiniCard title="Bec suprasolicitat" accent="rose">
-                  Dacă puterea primită este mai mare decât puterea nominală,
-                  becul se poate deteriora.
-                </MiniCard>
-
-                <MiniCard title="Condensator invers" accent="rose">
-                  Condensatorii polarizați trebuie conectați cu plus la
-                  potențial mai mare și minus la potențial mai mic.
-                </MiniCard>
-
-                <MiniCard title="Baterie scurtcircuitată" accent="rose">
-                  Plusul și minusul bateriei nu trebuie legate direct între ele.
-                  Curentul poate deveni foarte mare.
-                </MiniCard>
-
-                <MiniCard title="Surse diferite în paralel" accent="amber">
-                  Două baterii cu tensiuni diferite în paralel pot forța curent
-                  una prin cealaltă.
-                </MiniCard>
-              </div>
-            </SectionCard>
-
-            <SectionCard
-              id="mna"
-              eyebrow="09 · calcul intern"
-              title="Cum calculează VoltLab circuitul"
-            >
-              <p>
-                VoltLab folosește o metodă numită analiză nodală modificată
-                pentru circuitele de curent continuu. Pe scurt, simulatorul
-                identifică nodurile, construiește o matrice și calculează
-                tensiunile și curenții.
-              </p>
-
-              <div className="grid gap-4 md:grid-cols-3">
-                <MiniCard title="1. Noduri">
-                  Firele unesc pini și creează noduri electrice comune.
-                </MiniCard>
-
-                <MiniCard title="2. Ecuații">
-                  Componentele sunt transformate în relații matematice.
-                </MiniCard>
-
-                <MiniCard title="3. Rezultate">
-                  Se calculează tensiuni, curenți, puteri și afișaje.
-                </MiniCard>
-              </div>
 
               <p>
-                Condensatorul este modelat didactic: se încarcă și se descarcă
-                progresiv în timp, iar când este încărcat poate funcționa ca o
-                sursă temporară pentru consumatori.
-              </p>
-            </SectionCard>
-
-            <section className="rounded-[28px] border border-cyan-300/20 bg-cyan-300/10 p-6 text-center">
-              <h2 className="text-2xl font-bold text-white">
-                Gata de testat teoria?
-              </h2>
-              <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-cyan-50/75">
-                Întoarce-te în laborator, conectează componentele și vezi cum se
-                schimbă tensiunea, curentul, luminozitatea, bateria și
-                condensatorul.
+                Pentru un rezistor sau un bec, puterea ne spune câtă energie se
+                transformă în căldură și lumină. La bec, o putere mai mare
+                înseamnă de obicei lumină mai puternică, dar și încălzire mai
+                mare.
               </p>
 
-              <Link
-                to="/"
-                className="mt-5 inline-flex rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200"
-              >
-                Deschide laboratorul
-              </Link>
-            </section>
-          </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Formula>P = R · I²</Formula>
+                <Formula>P = U² / R</Formula>
+              </div>
+            </Section>
+
+            <Section id="baterie" title="8. Bateria reală și rezistența internă">
+              <p>
+                În teorie, o baterie ideală ar da mereu aceeași tensiune, oricât
+                curent i-ai cere. În realitate, orice baterie are o{" "}
+                <b>rezistență internă</b>. Aceasta se notează uneori cu{" "}
+                <b>r</b> sau <b>Rint</b>.
+              </p>
+
+              <p>
+                Rezistența internă se comportă ca un mic rezistor ascuns în
+                interiorul bateriei. Când curentul este mare, o parte din
+                tensiune se pierde pe această rezistență internă.
+              </p>
+
+              <Formula>Uborne = E - I · Rint</Formula>
+            </Section>
+
+            <Section id="bec" title="9. Becul electric">
+              <p>
+                Într-un model simplificat, un bec poate fi tratat ca o
+                rezistență. Curentul trece prin filament, filamentul se
+                încălzește și începe să lumineze.
+              </p>
+
+              <p>
+                Un bec are de obicei o <b>tensiune nominală</b> și o{" "}
+                <b>putere nominală</b>. Tensiunea nominală spune la ce tensiune
+                este proiectat să funcționeze, iar puterea nominală spune câtă
+                energie consumă normal.
+              </p>
+
+              <Formula>Rbec ≈ Vnom² / Pnom</Formula>
+
+              <Example>
+                Un bec de 6V și 0.5W are aproximativ R = 6² / 0.5 = 72Ω.
+              </Example>
+            </Section>
+
+            <Section id="serie" title="10. Circuit în serie">
+              <p>
+                Într-un circuit în serie, componentele sunt legate una după
+                alta, ca niște obstacole puse pe același drum.
+              </p>
+
+              <p>
+                În serie, prin toate componentele trece același curent.
+                Tensiunea sursei se împarte între componente.
+              </p>
+
+              <Formula>Rtotal = R1 + R2 + R3 + ...</Formula>
+            </Section>
+
+            <Section id="paralel" title="11. Circuit în paralel">
+              <p>
+                Într-un circuit în paralel, componentele sunt legate pe ramuri
+                diferite. Curentul se poate împărți pe mai multe drumuri.
+              </p>
+
+              <p>
+                În paralel, toate componentele au aceeași tensiune la borne.
+                Curentul total se împarte între ramuri.
+              </p>
+
+              <Formula>1 / Rtotal = 1 / R1 + 1 / R2 + 1 / R3 + ...</Formula>
+            </Section>
+
+            <Section id="scurtcircuit" title="12. Scurtcircuitul">
+              <p>
+                Scurtcircuitul apare când curentul găsește un drum cu rezistență
+                foarte mică, de obicei aproape zero. Atunci curentul poate
+                deveni foarte mare.
+              </p>
+
+              <Example>
+                Dacă legi direct plusul și minusul unei baterii cu un fir, fără
+                rezistor sau consumator, faci scurtcircuit. În realitate, asta
+                poate încălzi firul sau bateria.
+              </Example>
+            </Section>
+
+            <Section id="voltmetru" title="13. Voltmetrul">
+              <p>
+                Voltmetrul măsoară tensiunea între două puncte ale circuitului.
+                El se leagă în <b>paralel</b> cu elementul pe care vrei să îl
+                măsori.
+              </p>
+
+              <Formula>Voltmetrul se leagă în paralel</Formula>
+            </Section>
+
+            <Section id="ampermetru" title="14. Ampermetrul">
+              <p>
+                Ampermetrul măsoară curentul care trece printr-o ramură a
+                circuitului. El se leagă în <b>serie</b> cu elementul prin care
+                vrei să măsori curentul.
+              </p>
+
+              <Formula>Ampermetrul se leagă în serie</Formula>
+            </Section>
+
+            <Section id="ohmmetru" title="15. Ohmmetrul">
+              <p>
+                Ohmmetrul măsoară rezistența electrică. El se folosește pe o
+                componentă sau pe o porțiune de circuit, de preferat fără sursă
+                de tensiune activă.
+              </p>
+
+              <p>
+                În principiu, ohmmetrul trimite un curent mic de test și vede ce
+                tensiune apare. Apoi folosește legea lui Ohm ca să determine
+                rezistența.
+              </p>
+
+              <Formula>R = U / I</Formula>
+            </Section>
+
+            <Section id="noduri" title="16. Noduri, fire și ramificații">
+              <p>
+                Un nod electric este un punct unde se întâlnesc două sau mai
+                multe fire. Toate punctele unite direct prin fire ideale au
+                aceeași tensiune electrică.
+              </p>
+
+              <Formula>
+                Curentul care intră într-un nod = curentul care iese
+              </Formula>
+            </Section>
+
+            <Section id="kirchhoff" title="17. Regulile lui Kirchhoff">
+              <p>
+                Prima regulă se referă la noduri: suma curenților care intră
+                într-un nod este egală cu suma curenților care ies.
+              </p>
+
+              <Formula>ΣIintrare = ΣIeșire</Formula>
+
+              <p>
+                A doua regulă se referă la bucle: într-un traseu închis, suma
+                creșterilor de tensiune este egală cu suma căderilor de
+                tensiune.
+              </p>
+
+              <Formula>ΣU = 0 într-o buclă închisă</Formula>
+            </Section>
+
+            <Section id="simulator" title="18. Ce se întâmplă în simulator">
+              <p>
+                În VoltLab, componentele sunt reprezentate ca elemente de
+                circuit: bateria oferă tensiune, rezistorul limitează curentul,
+                becul se aprinde în funcție de puterea primită, întrerupătorul
+                deschide sau închide circuitul, iar instrumentele măsoară valori
+                electrice.
+              </p>
+
+              <p>
+                Firele conectează nodurile circuitului. Dacă două puncte sunt
+                unite prin fir, simulatorul le consideră parte din aceeași
+                conexiune electrică.
+              </p>
+            </Section>
+          </main>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
