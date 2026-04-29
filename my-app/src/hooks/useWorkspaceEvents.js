@@ -10,7 +10,7 @@ function dist2(a, b) {
   return dx * dx + dy * dy;
 }
 
-function distancePointToSegment(p, a, b) {
+function closestPointOnSegment(p, a, b) {
   const abx = b.x - a.x;
   const aby = b.y - a.y;
 
@@ -20,22 +20,46 @@ function distancePointToSegment(p, a, b) {
   const abLen2 = abx * abx + aby * aby;
 
   if (abLen2 <= 0.000001) {
-    return Math.sqrt(dist2(p, a));
+    return {
+      point: { x: a.x, y: a.y },
+      t: 0,
+      distance: Math.sqrt(dist2(p, a)),
+    };
   }
 
   let t = (apx * abx + apy * aby) / abLen2;
   t = Math.max(0, Math.min(1, t));
 
-  const proj = {
+  const point = {
     x: a.x + abx * t,
     y: a.y + aby * t,
   };
 
-  return Math.sqrt(dist2(p, proj));
+  return {
+    point,
+    t,
+    distance: Math.sqrt(dist2(p, point)),
+  };
 }
 
 function isJunctionNode(n) {
   return n?.kind === "junction" || n?.itemId == null || n?.name === "junction";
+}
+
+function isTypingTarget(target) {
+  if (!target) return false;
+
+  const tag = target.tagName?.toLowerCase?.();
+
+  if (tag === "input") return true;
+  if (tag === "textarea") return true;
+  if (tag === "select") return true;
+
+  if (target.isContentEditable) return true;
+  if (target.closest?.("[contenteditable='true']")) return true;
+  if (target.closest?.("input, textarea, select")) return true;
+
+  return false;
 }
 
 function findNearestNode(nodes, worldPoint, radiusWorld) {
@@ -90,25 +114,38 @@ function findNearestWire(wires, nodes, cam, screenPoint, radiusPx = 12) {
 
     if (!aNode || !bNode) continue;
 
-    const points = [
+    const worldPoints = [
       { x: aNode.x, y: aNode.y },
       ...(wire.points ?? []),
       { x: bNode.x, y: bNode.y },
     ];
 
-    for (let j = 0; j < points.length - 1; j++) {
-      const a = worldToScreen(points[j].x, points[j].y, cam);
-      const b = worldToScreen(points[j + 1].x, points[j + 1].y, cam);
+    const screenPoints = worldPoints.map((p) =>
+      worldToScreen(p.x, p.y, cam)
+    );
 
-      const d = distancePointToSegment(screenPoint, a, b);
+    for (let j = 0; j < screenPoints.length - 1; j++) {
+      const aScreen = screenPoints[j];
+      const bScreen = screenPoints[j + 1];
 
-      if (d < bestD) {
-        bestD = d;
+      const hit = closestPointOnSegment(screenPoint, aScreen, bScreen);
+
+      if (hit.distance < bestD) {
+        const aWorld = worldPoints[j];
+        const bWorld = worldPoints[j + 1];
+
+        const worldPoint = {
+          x: aWorld.x + (bWorld.x - aWorld.x) * hit.t,
+          y: aWorld.y + (bWorld.y - aWorld.y) * hit.t,
+        };
+
+        bestD = hit.distance;
         best = {
           wire,
           wireIndex: i,
           segmentIndex: j,
-          distance: d,
+          distance: hit.distance,
+          worldPoint,
         };
       }
     }
@@ -145,6 +182,7 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
   const { state, actions, dispatch } = useVoltLab();
 
   const junctionDragRef = useRef(null);
+  const wireSegmentDragRef = useRef(null);
 
   useEffect(() => {
     const el = workspaceRef.current;
@@ -189,8 +227,32 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
       const targetIsComponent = isComponentTarget(e.target);
       const itemUnderMouse = findItemAtWorld(state.items, worldPoint);
 
-      // Dacă apăsăm pe componentă, NU pornim pan.
-      // Componenta este gestionată de onItemMouseDown din Overlay/useVoltLabStore.
+      /*
+        Componentă:
+        - selectează componenta
+        - lastTouched devine item
+        - inspectorul trebuie să apară
+      */
+      if (
+        e.button === 0 &&
+        state.mode === "select" &&
+        (targetIsComponent || itemUnderMouse)
+      ) {
+        const itemId =
+          itemUnderMouse?.id ??
+          e.target.closest?.("[data-item-id]")?.getAttribute?.("data-item-id");
+
+        if (itemId) {
+          actions.onItemMouseDown(itemId, e);
+          actions.setLastTouched({ type: "item", id: itemId });
+          return;
+        }
+      }
+
+      /*
+        În wire mode, dacă apeși pe componentă/pini, nu pornim pan și nu selectăm fir.
+        Lăsăm overlay-ul/componenta să gestioneze.
+      */
       if (targetIsComponent || itemUnderMouse) {
         dispatch({
           type: "SET_CAM",
@@ -206,6 +268,12 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
 
       if (!isWorkspaceTarget(e.target)) return;
 
+      /*
+        Nod/joncțiune:
+        - lastTouched devine node
+        - poate fi tras
+        - Delete va șterge nodul
+      */
       if (e.button === 0 && state.mode === "select") {
         const junctionHitRadiusWorld = 22 / state.cam.z;
 
@@ -226,13 +294,75 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
           };
 
           dispatch({ type: "SET_SELECTED", id: null });
+          actions.setSelectedWireSegment(null);
+          actions.setLastTouched({ type: "node", id: hitJunction.id });
 
           return;
         }
       }
 
+      /*
+        Fir:
+        - lastTouched devine wire
+        - poate fi șters cu Delete
+        - poate fi tras
+      */
+      if (e.button === 0 && state.mode === "select") {
+        const screenPoint = { x: loc.x, y: loc.y };
+
+        const hitWire = findNearestWire(
+          state.wires,
+          state.nodes,
+          state.cam,
+          screenPoint,
+          12
+        );
+
+        if (hitWire) {
+          e.preventDefault();
+          e.stopPropagation();
+
+          const segment = {
+            wireIndex: hitWire.wireIndex,
+            segmentIndex: hitWire.segmentIndex,
+          };
+
+          actions.setSelectedWireSegment(segment);
+          actions.setLastTouched({
+            type: "wire",
+            wireIndex: hitWire.wireIndex,
+            segmentIndex: hitWire.segmentIndex,
+          });
+
+          wireSegmentDragRef.current = {
+            wireIndex: hitWire.wireIndex,
+            segmentIndex: hitWire.segmentIndex,
+            lastWorld: worldPoint,
+          };
+
+          dispatch({
+            type: "SET_CAM",
+            cam: {
+              ...state.cam,
+              __panCandidate: null,
+              __pan: null,
+              __drag: null,
+            },
+          });
+
+          return;
+        }
+      }
+
+      /*
+        Click pe gol:
+        - deselectează componenta/firul
+        - NU șterge lastTouched automat, ca Delete să poată lucra pe ultimul atins
+          până atingi altceva.
+      */
       if (state.mode === "select") {
         dispatch({ type: "SET_SELECTED", id: null });
+        actions.setSelectedWireSegment(null);
       }
 
       if (e.button === 0 && state.mode === "select") {
@@ -272,9 +402,40 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
     }
 
     function onMouseMove(e) {
+      const wireSegmentDrag = wireSegmentDragRef.current;
+
+      if (wireSegmentDrag) {
+        const loc = getLocal(e);
+        const w = screenToWorld(loc.x, loc.y, state.cam);
+
+        const dx = w.x - wireSegmentDrag.lastWorld.x;
+        const dy = w.y - wireSegmentDrag.lastWorld.y;
+
+        if (Math.abs(dx) > 0.0001 || Math.abs(dy) > 0.0001) {
+          actions.moveWireSegment(
+            wireSegmentDrag.wireIndex,
+            wireSegmentDrag.segmentIndex,
+            dx,
+            dy
+          );
+
+          actions.setLastTouched({
+            type: "wire",
+            wireIndex: wireSegmentDrag.wireIndex,
+            segmentIndex: wireSegmentDrag.segmentIndex,
+          });
+
+          wireSegmentDragRef.current = {
+            ...wireSegmentDrag,
+            lastWorld: w,
+          };
+        }
+
+        return;
+      }
+
       const junctionDrag = junctionDragRef.current;
 
-      // 1. Mutare joncțiune — prioritate maximă.
       if (junctionDrag) {
         const loc = getLocal(e);
         const w = screenToWorld(loc.x, loc.y, state.cam);
@@ -296,12 +457,16 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
           wires: state.wires,
         });
 
+        actions.setLastTouched({
+          type: "node",
+          id: junctionDrag.id,
+        });
+
         return;
       }
 
       const drag = state.cam.__drag;
 
-      // 2. Mutare componentă — înainte de pan.
       if (drag) {
         const loc = getLocal(e);
         const w = screenToWorld(loc.x, loc.y, state.cam);
@@ -328,10 +493,14 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
           wires: state.wires,
         });
 
+        actions.setLastTouched({
+          type: "item",
+          id: drag.id,
+        });
+
         return;
       }
 
-      // 3. Pan doar dacă nu tragem nimic.
       const cand = state.cam.__panCandidate;
 
       if (cand) {
@@ -385,6 +554,7 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
     }
 
     function onMouseUp() {
+      wireSegmentDragRef.current = null;
       junctionDragRef.current = null;
 
       if (state.cam.__panCandidate) {
@@ -460,6 +630,7 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
       );
 
       if (hitNode) {
+        actions.setLastTouched({ type: "node", id: hitNode.id });
         actions.useNodeAsWireTarget(hitNode.id);
         return;
       }
@@ -473,21 +644,44 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
       );
 
       if (hitWire) {
-        actions.insertJunctionOnWire(
+        const nodeId = actions.insertJunctionOnWire(
           hitWire.wireIndex,
-          worldPoint.x,
-          worldPoint.y
+          hitWire.worldPoint?.x ?? worldPoint.x,
+          hitWire.worldPoint?.y ?? worldPoint.y,
+          hitWire.segmentIndex
         );
+
+        if (nodeId) {
+          actions.setLastTouched({ type: "node", id: nodeId });
+        }
 
         return;
       }
 
-      actions.addJunctionAndUseAsWireTarget(worldPoint.x, worldPoint.y);
+      const nodeId = actions.addJunctionAndUseAsWireTarget(
+        worldPoint.x,
+        worldPoint.y
+      );
+
+      if (nodeId) {
+        actions.setLastTouched({ type: "node", id: nodeId });
+      }
     }
 
     function onKeyDown(e) {
+      /*
+        Dacă ești într-un input din Inspector, Delete/Backspace trebuie să șteargă textul,
+        nu componenta/firul/nodul.
+      */
+      if ((e.key === "Delete" || e.key === "Backspace") && isTypingTarget(e.target)) {
+        return;
+      }
+
       if (e.key === "Escape") {
+        wireSegmentDragRef.current = null;
         junctionDragRef.current = null;
+
+        actions.setSelectedWireSegment(null);
 
         dispatch({
           type: "SET_WIRE_STATE",
@@ -521,17 +715,20 @@ export function useWorkspaceEvents(workspaceRef, overlayRef) {
       }
 
       if (e.key === "Delete") {
-        if (state.selectedId) {
-          actions.deleteItem(state.selectedId);
-        }
+        actions.deleteLastTouched();
+        return;
       }
 
       if (e.key.toLowerCase() === "w") {
-        actions.setMode("wire");
+        if (!isTypingTarget(e.target)) {
+          actions.setMode("wire");
+        }
       }
 
       if (e.key.toLowerCase() === "s") {
-        actions.setMode("select");
+        if (!isTypingTarget(e.target)) {
+          actions.setMode("select");
+        }
       }
     }
 

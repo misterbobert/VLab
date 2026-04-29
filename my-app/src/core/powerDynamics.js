@@ -109,6 +109,21 @@ export function stepPowerStorage(items, nodes, sol, dtSec) {
       const Vmax = Math.max(0.000001, safeNumber(copy.Vmax, 9));
       const oldVoltage = safeNumber(copy.capVoltage, 0);
 
+      /*
+        IMPORTANT:
+        Înainte, C/Farazii erau folosiți doar pentru sarcină și energie:
+          Q = C * V
+          E = 1/2 * C * V^2
+
+        De aceea, când schimbai Farazii, nu vedeai mare lucru la încărcare/descărcare.
+        Acum folosim C și la timpul de încărcare/descărcare.
+
+        Valoarea default este 0.001 F.
+        - C mai mic decât 0.001 F => se încarcă/descarcă mai repede
+        - C mai mare decât 0.001 F => se încarcă/descarcă mai lent
+      */
+      const capacitanceFactor = Math.max(0.05, Math.min(50, C / 0.001));
+
       const appliedVoltage = getAppliedVoltageAcrossItem(copy, nodes, sol);
 
       let currentA = 0;
@@ -131,7 +146,10 @@ export function stepPowerStorage(items, nodes, sol, dtSec) {
         currentA > 0.000001 && Math.abs(oldVoltage) > 0.0001;
 
       if (voltageWantsToCharge) {
-        const tau = Math.max(0, safeNumber(copy.chargeTimeSec, 1.2));
+        const tau = Math.max(
+          0,
+          safeNumber(copy.chargeTimeSec, 1.2) * capacitanceFactor
+        );
 
         if (tau <= 0.02) {
           nextVoltage = appliedVoltage;
@@ -142,8 +160,11 @@ export function stepPowerStorage(items, nodes, sol, dtSec) {
       } else if (isDeliveringPower) {
         // Model didactic:
         // când condensatorul alimentează un consumator, îl descărcăm după timpul setat în Inspector,
-        // nu după formula fizică dură I/C, care îl golește instant la valori mici.
-        const tau = Math.max(0, safeNumber(copy.dischargeTimeSec, 2));
+        // dar acel timp este influențat și de capacitatea C.
+        const tau = Math.max(
+          0,
+          safeNumber(copy.dischargeTimeSec, 2) * capacitanceFactor
+        );
 
         if (tau <= 0.02) {
           nextVoltage = 0;
@@ -153,9 +174,13 @@ export function stepPowerStorage(items, nodes, sol, dtSec) {
         }
       } else if (!hasExternalVoltage && copy.leakageEnabled !== false) {
         // Pierdere lentă când nu e alimentat și nu descarcă activ pe consumator.
-        const tau = Math.max(0.02, safeNumber(copy.dischargeTimeSec, 2));
-        const k = 1 - Math.exp(-dt / tau);
+        // Și aici Farazii influențează viteza pierderii.
+        const tau = Math.max(
+          0.02,
+          safeNumber(copy.dischargeTimeSec, 2) * capacitanceFactor
+        );
 
+        const k = 1 - Math.exp(-dt / tau);
         nextVoltage = oldVoltage + (0 - oldVoltage) * k;
       }
 

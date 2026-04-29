@@ -33,6 +33,15 @@ const initialState = {
   wires: [],
 
   selectedId: null,
+  selectedWireSegment: null,
+
+  /*
+    lastTouched ține minte ultima chestie atinsă:
+    - componentă: { type: "item", id }
+    - nod/joncțiune: { type: "node", id }
+    - fir: { type: "wire", wireIndex, segmentIndex }
+  */
+  lastTouched: null,
 
   cam: { x: 0, y: 0, z: 1 },
 
@@ -64,6 +73,27 @@ function makeWire(aNodeId, bNodeId, points = []) {
     bNodeId,
     points,
   };
+}
+
+function isJunctionNode(node) {
+  return node?.kind === "junction" || node?.itemId == null || node?.name === "junction";
+}
+
+function wireTouchesNode(wire, nodeId) {
+  return wire.aNodeId === nodeId || wire.bNodeId === nodeId;
+}
+
+function otherWireNodeId(wire, nodeId) {
+  if (wire.aNodeId === nodeId) return wire.bNodeId;
+  if (wire.bNodeId === nodeId) return wire.aNodeId;
+  return null;
+}
+
+function sameWireConnection(wire, aNodeId, bNodeId) {
+  return (
+    (wire.aNodeId === aNodeId && wire.bNodeId === bNodeId) ||
+    (wire.aNodeId === bNodeId && wire.bNodeId === aNodeId)
+  );
 }
 
 function solveAndApply(items, nodes, wires) {
@@ -124,8 +154,15 @@ function resetCalculatedValues(items) {
       copy.displayVoltage = Number.isFinite(safeVoltage)
         ? `${safeVoltage.toFixed(2)}V`
         : "—";
-      copy.displayCharge = Number.isFinite(charge) ? `${charge.toExponential(2)}C` : "—";
-      copy.displayEnergy = Number.isFinite(energy) ? `${energy.toExponential(2)}J` : "—";
+
+      copy.displayCharge = Number.isFinite(charge)
+        ? `${charge.toExponential(2)}C`
+        : "—";
+
+      copy.displayEnergy = Number.isFinite(energy)
+        ? `${energy.toExponential(2)}J`
+        : "—";
+
       copy.displayPercent = `${Math.round(percent * 100)}%`;
     }
 
@@ -161,6 +198,28 @@ function reducer(state, action) {
       return {
         ...state,
         selectedId: action.id,
+        selectedWireSegment: action.id ? null : state.selectedWireSegment,
+        lastTouched: action.id ? { type: "item", id: action.id } : state.lastTouched,
+      };
+
+    case "SET_SELECTED_WIRE_SEGMENT":
+      return {
+        ...state,
+        selectedId: action.segment ? null : state.selectedId,
+        selectedWireSegment: action.segment,
+        lastTouched: action.segment
+          ? {
+              type: "wire",
+              wireIndex: action.segment.wireIndex,
+              segmentIndex: action.segment.segmentIndex ?? 0,
+            }
+          : state.lastTouched,
+      };
+
+    case "SET_LAST_TOUCHED":
+      return {
+        ...state,
+        lastTouched: action.target,
       };
 
     case "SET_ITEMS_NODES_WIRES": {
@@ -212,53 +271,66 @@ export function VoltLabProvider({ children }) {
 
   const stateRef = useRef(state);
   const workspaceElRef = useRef(null);
-useEffect(() => {
-  const raw = localStorage.getItem("voltlab:loadExample");
-  if (!raw) return;
 
-  try {
-    const snap = JSON.parse(raw);
+  useEffect(() => {
+    const raw = localStorage.getItem("voltlab:loadExample");
+    if (!raw) return;
 
-    localStorage.removeItem("voltlab:loadExample");
+    try {
+      const snap = JSON.parse(raw);
 
-    if (!snap?.items || !snap?.nodes || !snap?.wires) return;
+      localStorage.removeItem("voltlab:loadExample");
 
-    dispatch({ type: "SET_RUNNING", running: false });
-    dispatch({ type: "SET_SOLUTION", sol: null });
-    dispatch({ type: "SET_SAFETY_DIALOG", dialog: null });
+      if (!snap?.items || !snap?.nodes || !snap?.wires) return;
 
-    dispatch({
-      type: "SET_ITEMS_NODES_WIRES",
-      items: snap.items,
-      nodes: snap.nodes,
-      wires: snap.wires,
-    });
+      dispatch({ type: "SET_RUNNING", running: false });
+      dispatch({ type: "SET_SOLUTION", sol: null });
+      dispatch({ type: "SET_SAFETY_DIALOG", dialog: null });
 
-    dispatch({ type: "SET_SELECTED", id: snap.selectedId ?? null });
-   const centeredCam = snap.autoCenter
-  ? {
-      x: Math.round(window.innerWidth / 2),
-      y: Math.round(window.innerHeight / 2),
-      z: snap.cam?.z ?? 0.85,
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items: snap.items,
+        nodes: snap.nodes,
+        wires: snap.wires,
+      });
+
+      dispatch({ type: "SET_SELECTED", id: snap.selectedId ?? null });
+
+      dispatch({
+        type: "SET_SELECTED_WIRE_SEGMENT",
+        segment: snap.selectedWireSegment ?? null,
+      });
+
+      dispatch({
+        type: "SET_LAST_TOUCHED",
+        target: snap.lastTouched ?? null,
+      });
+
+      const centeredCam = snap.autoCenter
+        ? {
+            x: Math.round(window.innerWidth / 2),
+            y: Math.round(window.innerHeight / 2),
+            z: snap.cam?.z ?? 0.85,
+          }
+        : snap.cam ?? { x: 0, y: 0, z: 1 };
+
+      dispatch({ type: "SET_CAM", cam: centeredCam });
+      dispatch({ type: "SET_MODE", mode: snap.mode ?? "select" });
+
+      dispatch({
+        type: "SET_WIRE_STATE",
+        wire: { startNodeId: null, points: [], previewWorld: null },
+      });
+
+      dispatch({
+        type: "SET_STATUS",
+        text: "Example loaded",
+      });
+    } catch {
+      localStorage.removeItem("voltlab:loadExample");
     }
-  : snap.cam ?? { x: 0, y: 0, z: 1 };
+  }, []);
 
-dispatch({ type: "SET_CAM", cam: centeredCam });
-    dispatch({ type: "SET_MODE", mode: snap.mode ?? "select" });
-
-    dispatch({
-      type: "SET_WIRE_STATE",
-      wire: { startNodeId: null, points: [], previewWorld: null },
-    });
-
-    dispatch({
-      type: "SET_STATUS",
-      text: "Example loaded",
-    });
-  } catch {
-    localStorage.removeItem("voltlab:loadExample");
-  }
-}, []);
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
@@ -269,6 +341,8 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
       nodes: state.nodes,
       wires: state.wires,
       selectedId: state.selectedId,
+      selectedWireSegment: state.selectedWireSegment,
+      lastTouched: state.lastTouched,
       cam: state.cam,
       mode: state.mode,
     }),
@@ -288,6 +362,17 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
       });
 
       dispatch({ type: "SET_SELECTED", id: snap.selectedId ?? null });
+
+      dispatch({
+        type: "SET_SELECTED_WIRE_SEGMENT",
+        segment: snap.selectedWireSegment ?? null,
+      });
+
+      dispatch({
+        type: "SET_LAST_TOUCHED",
+        target: snap.lastTouched ?? null,
+      });
+
       dispatch({ type: "SET_CAM", cam: snap.cam ?? state.cam });
       dispatch({ type: "SET_MODE", mode: snap.mode ?? "select" });
 
@@ -316,7 +401,7 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
 
       const { sol, solvedItems } = solveAndApply(s.items, s.nodes, s.wires);
 
-     const withStorage = stepPowerStorage(solvedItems, s.nodes, sol, dtSec);
+      const withStorage = stepPowerStorage(solvedItems, s.nodes, sol, dtSec);
 
       dispatch({ type: "SET_SOLUTION", sol });
 
@@ -376,6 +461,13 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
       dispatch({ type: "SET_CAM", cam });
     }
 
+    function setLastTouched(target) {
+      dispatch({
+        type: "SET_LAST_TOUCHED",
+        target,
+      });
+    }
+
     function addItemAt(type, worldX, worldY) {
       pushHistory("add");
 
@@ -415,7 +507,7 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
       const item = state.items.find((x) => x.id === id);
       if (!item) return;
 
-      pushHistory("delete");
+      pushHistory("delete item");
 
       const items = state.items.filter((x) => x.id !== id);
       const nodes = state.nodes.filter((n) => n.itemId !== id);
@@ -436,11 +528,172 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
       dispatch({ type: "SET_SELECTED", id: null });
 
       dispatch({
+        type: "SET_SELECTED_WIRE_SEGMENT",
+        segment: null,
+      });
+
+      dispatch({
+        type: "SET_LAST_TOUCHED",
+        target: null,
+      });
+
+      dispatch({
         type: "SET_WIRE_STATE",
         wire: { startNodeId: null, points: [], previewWorld: null },
       });
 
       setStatus(state.running ? "Running" : "Deleted item");
+    }
+
+    function deleteWireByIndex(wireIndex) {
+      if (wireIndex == null || wireIndex < 0 || wireIndex >= state.wires.length) {
+        dispatch({
+          type: "SET_SELECTED_WIRE_SEGMENT",
+          segment: null,
+        });
+
+        dispatch({
+          type: "SET_LAST_TOUCHED",
+          target: null,
+        });
+
+        return;
+      }
+
+      pushHistory("delete wire");
+
+      const wires = state.wires.filter((_, index) => index !== wireIndex);
+
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items: state.items,
+        nodes: state.nodes,
+        wires,
+      });
+
+      dispatch({
+        type: "SET_SELECTED_WIRE_SEGMENT",
+        segment: null,
+      });
+
+      dispatch({
+        type: "SET_LAST_TOUCHED",
+        target: null,
+      });
+
+      setStatus(state.running ? "Running" : "Deleted wire");
+    }
+
+    function deleteJunctionNode(nodeId) {
+      const node = state.nodes.find((n) => n.id === nodeId);
+
+      if (!node || !isJunctionNode(node)) return;
+
+      pushHistory("delete node");
+
+      const connected = [];
+
+      for (let i = 0; i < state.wires.length; i++) {
+        const wire = state.wires[i];
+
+        if (wireTouchesNode(wire, nodeId)) {
+          const otherId = otherWireNodeId(wire, nodeId);
+          const otherNode = state.nodes.find((n) => n.id === otherId);
+
+          connected.push({
+            wire,
+            wireIndex: i,
+            otherId,
+            otherNode,
+          });
+        }
+      }
+
+      let wires = state.wires.filter((w) => !wireTouchesNode(w, nodeId));
+      const nodes = state.nodes.filter((n) => n.id !== nodeId);
+
+      /*
+        Cerința ta:
+        Dacă nodul șters era între două noduri externe/joncțiuni,
+        acele două noduri rămân conectate după ștergere.
+
+        Deci:
+        j1 --- nod selectat --- j2
+        devine:
+        j1 --------------- j2
+
+        Nu facem bridge dacă vecinii sunt pini de componente.
+      */
+      const canBridge =
+        connected.length === 2 &&
+        connected[0].otherId &&
+        connected[1].otherId &&
+        connected[0].otherId !== connected[1].otherId &&
+        isJunctionNode(connected[0].otherNode) &&
+        isJunctionNode(connected[1].otherNode);
+
+      if (canBridge) {
+        const a = connected[0].otherId;
+        const b = connected[1].otherId;
+
+        const alreadyExists = wires.some((w) => sameWireConnection(w, a, b));
+
+        if (!alreadyExists) {
+          wires = [...wires, makeWire(a, b)];
+        }
+      }
+
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items: state.items,
+        nodes,
+        wires,
+      });
+
+      dispatch({
+        type: "SET_SELECTED_WIRE_SEGMENT",
+        segment: null,
+      });
+
+      dispatch({
+        type: "SET_LAST_TOUCHED",
+        target: null,
+      });
+
+      dispatch({
+        type: "SET_WIRE_STATE",
+        wire: { startNodeId: null, points: [], previewWorld: null },
+      });
+
+      setStatus(state.running ? "Running" : canBridge ? "Deleted node and reconnected wire" : "Deleted node");
+    }
+
+    function deleteLastTouched() {
+      const target = state.lastTouched;
+
+      if (target?.type === "item" && target.id) {
+        deleteItem(target.id);
+        return;
+      }
+
+      if (target?.type === "node" && target.id) {
+        deleteJunctionNode(target.id);
+        return;
+      }
+
+      if (target?.type === "wire") {
+        deleteWireByIndex(target.wireIndex);
+        return;
+      }
+
+      if (state.selectedWireSegment) {
+        deleteWireByIndex(state.selectedWireSegment.wireIndex);
+        return;
+      }
+
+      if (state.selectedId) {
+        deleteItem(state.selectedId);
+      }
     }
 
     function clearWires() {
@@ -453,6 +706,16 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
         items: state.items,
         nodes,
         wires: [],
+      });
+
+      dispatch({
+        type: "SET_SELECTED_WIRE_SEGMENT",
+        segment: null,
+      });
+
+      dispatch({
+        type: "SET_LAST_TOUCHED",
+        target: null,
       });
 
       dispatch({
@@ -513,6 +776,16 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
       e.stopPropagation?.();
 
       dispatch({ type: "SET_SELECTED", id: itemId });
+
+      dispatch({
+        type: "SET_SELECTED_WIRE_SEGMENT",
+        segment: null,
+      });
+
+      dispatch({
+        type: "SET_LAST_TOUCHED",
+        target: { type: "item", id: itemId },
+      });
 
       if (state.mode !== "select") return;
 
@@ -581,6 +854,16 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
         nodes: state.nodes,
         wires,
       });
+
+      dispatch({
+        type: "SET_SELECTED_WIRE_SEGMENT",
+        segment: null,
+      });
+
+      dispatch({
+        type: "SET_LAST_TOUCHED",
+        target: { type: "wire", wireIndex: wires.length - 1, segmentIndex: 0 },
+      });
     }
 
     function addJunctionAt(worldX, worldY) {
@@ -595,6 +878,11 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
         wires: state.wires,
       });
 
+      dispatch({
+        type: "SET_LAST_TOUCHED",
+        target: { type: "node", id: junction.id },
+      });
+
       setStatus("Added junction");
 
       return junction.id;
@@ -602,6 +890,11 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
 
     function useNodeAsWireTarget(nodeId) {
       if (!nodeId) return;
+
+      dispatch({
+        type: "SET_LAST_TOUCHED",
+        target: { type: "node", id: nodeId },
+      });
 
       if (!state.wire.startNodeId) {
         dispatch({
@@ -655,6 +948,11 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
       });
 
       dispatch({
+        type: "SET_LAST_TOUCHED",
+        target: { type: "node", id: junction.id },
+      });
+
+      dispatch({
         type: "SET_WIRE_STATE",
         wire: state.wire.startNodeId
           ? { startNodeId: null, points: [], previewWorld: null }
@@ -672,13 +970,22 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
       return junction.id;
     }
 
-    function insertJunctionOnWire(wireIndex, worldX, worldY) {
+    function insertJunctionOnWire(wireIndex, worldX, worldY, segmentIndex = 0) {
       const oldWire = state.wires[wireIndex];
       if (!oldWire) return null;
 
       pushHistory("split wire");
 
       const junction = makeJunctionNode(worldX, worldY);
+      const oldPoints = oldWire.points ?? [];
+
+      const safeSegmentIndex = Math.max(
+        0,
+        Math.min(segmentIndex, oldPoints.length)
+      );
+
+      const firstWirePoints = oldPoints.slice(0, safeSegmentIndex);
+      const secondWirePoints = oldPoints.slice(safeSegmentIndex);
 
       const wires = [];
 
@@ -690,8 +997,8 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
           continue;
         }
 
-        wires.push(makeWire(w.aNodeId, junction.id));
-        wires.push(makeWire(junction.id, w.bNodeId));
+        wires.push(makeWire(w.aNodeId, junction.id, firstWirePoints));
+        wires.push(makeWire(junction.id, w.bNodeId, secondWirePoints));
       }
 
       if (state.wire.startNodeId && state.wire.startNodeId !== junction.id) {
@@ -705,6 +1012,11 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
         items: state.items,
         nodes: [...state.nodes, junction],
         wires,
+      });
+
+      dispatch({
+        type: "SET_LAST_TOUCHED",
+        target: { type: "node", id: junction.id },
       });
 
       dispatch({
@@ -725,6 +1037,114 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
       return junction.id;
     }
 
+    function setSelectedWireSegment(segment) {
+      dispatch({
+        type: "SET_SELECTED_WIRE_SEGMENT",
+        segment,
+      });
+    }
+
+    function deleteSelectedWireSegment() {
+      const selected = state.selectedWireSegment;
+      if (!selected) return;
+
+      deleteWireByIndex(selected.wireIndex);
+    }
+
+    function moveWireSegment(wireIndex, segmentIndex, dx, dy) {
+      const wire = state.wires[wireIndex];
+      if (!wire) return;
+
+      const points = wire.points ?? [];
+
+      const refs = [
+        { type: "node", id: wire.aNodeId },
+        ...points.map((_, index) => ({ type: "point", index })),
+        { type: "node", id: wire.bNodeId },
+      ];
+
+      const aRef = refs[segmentIndex];
+      const bRef = refs[segmentIndex + 1];
+
+      if (!aRef || !bRef) return;
+
+      const nodeMap = new Map(state.nodes.map((n) => [n.id, n]));
+
+      const itemIdsToMove = new Set();
+      const junctionNodeIdsToMove = new Set();
+      const pointIndicesToMove = new Set();
+
+      function collect(ref) {
+        if (ref.type === "point") {
+          pointIndicesToMove.add(ref.index);
+          return;
+        }
+
+        const node = nodeMap.get(ref.id);
+        if (!node) return;
+
+        if (node.itemId) {
+          itemIdsToMove.add(node.itemId);
+        } else {
+          junctionNodeIdsToMove.add(node.id);
+        }
+      }
+
+      collect(aRef);
+      collect(bRef);
+
+      const items = state.items.map((item) => {
+        if (!itemIdsToMove.has(item.id)) return item;
+
+        return {
+          ...item,
+          x: item.x + dx,
+          y: item.y + dy,
+        };
+      });
+
+      const nodes = state.nodes.map((node) => {
+        if (!junctionNodeIdsToMove.has(node.id)) return node;
+
+        return {
+          ...node,
+          x: node.x + dx,
+          y: node.y + dy,
+        };
+      });
+
+      const wires = state.wires.map((w, index) => {
+        if (index !== wireIndex) return w;
+
+        const nextPoints = (w.points ?? []).map((point, pointIndex) => {
+          if (!pointIndicesToMove.has(pointIndex)) return point;
+
+          return {
+            ...point,
+            x: point.x + dx,
+            y: point.y + dy,
+          };
+        });
+
+        return {
+          ...w,
+          points: nextPoints,
+        };
+      });
+
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items,
+        nodes,
+        wires,
+      });
+
+      dispatch({
+        type: "SET_LAST_TOUCHED",
+        target: { type: "wire", wireIndex, segmentIndex },
+      });
+    }
+
     function play() {
       dispatch({ type: "SET_RUNNING", running: true });
       dispatch({ type: "SET_STATUS", text: "Solving..." });
@@ -736,7 +1156,7 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
         state.wires
       );
 
-     const withStorage = stepPowerStorage(solvedItems, state.nodes, sol, 0.08);
+      const withStorage = stepPowerStorage(solvedItems, state.nodes, sol, 0.08);
 
       dispatch({ type: "SET_SOLUTION", sol });
 
@@ -817,6 +1237,8 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
       setStatus,
       setCam,
 
+      setLastTouched,
+
       handleDrop,
       onItemMouseDown,
 
@@ -825,6 +1247,13 @@ dispatch({ type: "SET_CAM", cam: centeredCam });
       useNodeAsWireTarget,
       addJunctionAndUseAsWireTarget,
       insertJunctionOnWire,
+
+      setSelectedWireSegment,
+      deleteSelectedWireSegment,
+      deleteLastTouched,
+      deleteWireByIndex,
+      deleteJunctionNode,
+      moveWireSegment,
 
       updateItem,
       deleteItem,
