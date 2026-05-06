@@ -4,6 +4,7 @@ import Workspace from "./Workspace";
 import Inspector from "./Inspector";
 import SidebarLibrary from "./SidebarLibrary";
 import SafetyDialog from "./SafetyDialog";
+import SavePanel from "../accounts/SavePanel";
 import { VoltLabProvider } from "../../hooks/useVoltLabStore.jsx";
 
 export default function LabShell() {
@@ -26,11 +27,13 @@ export default function LabShell() {
 
           {/* Inspector dreapta cu scroll intern */}
           <div className="absolute right-4 top-24 bottom-4 w-[360px] pointer-events-auto">
-            <div className="voltlab-scroll  h-full overflow-y-auto overflow-x-hidden rounded-[22px]">
+            <div className="voltlab-scroll h-full overflow-y-auto overflow-x-hidden rounded-[22px]">
               <Inspector />
             </div>
           </div>
         </div>
+
+        <SavePanel />
 
         <SafetyDialog />
       </div>

@@ -76,7 +76,11 @@ function makeWire(aNodeId, bNodeId, points = []) {
 }
 
 function isJunctionNode(node) {
-  return node?.kind === "junction" || node?.itemId == null || node?.name === "junction";
+  return (
+    node?.kind === "junction" ||
+    node?.itemId == null ||
+    node?.name === "junction"
+  );
 }
 
 function wireTouchesNode(wire, nodeId) {
@@ -199,7 +203,9 @@ function reducer(state, action) {
         ...state,
         selectedId: action.id,
         selectedWireSegment: action.id ? null : state.selectedWireSegment,
-        lastTouched: action.id ? { type: "item", id: action.id } : state.lastTouched,
+        lastTouched: action.id
+          ? { type: "item", id: action.id }
+          : state.lastTouched,
       };
 
     case "SET_SELECTED_WIRE_SEGMENT":
@@ -546,7 +552,11 @@ export function VoltLabProvider({ children }) {
     }
 
     function deleteWireByIndex(wireIndex) {
-      if (wireIndex == null || wireIndex < 0 || wireIndex >= state.wires.length) {
+      if (
+        wireIndex == null ||
+        wireIndex < 0 ||
+        wireIndex >= state.wires.length
+      ) {
         dispatch({
           type: "SET_SELECTED_WIRE_SEGMENT",
           segment: null,
@@ -665,7 +675,13 @@ export function VoltLabProvider({ children }) {
         wire: { startNodeId: null, points: [], previewWorld: null },
       });
 
-      setStatus(state.running ? "Running" : canBridge ? "Deleted node and reconnected wire" : "Deleted node");
+      setStatus(
+        state.running
+          ? "Running"
+          : canBridge
+          ? "Deleted node and reconnected wire"
+          : "Deleted node"
+      );
     }
 
     function deleteLastTouched() {
@@ -1232,6 +1248,75 @@ export function VoltLabProvider({ children }) {
       history.redo();
     }
 
+    function getSnapshot() {
+      const cam = {
+        x: Number.isFinite(state.cam?.x) ? state.cam.x : 0,
+        y: Number.isFinite(state.cam?.y) ? state.cam.y : 0,
+        z: Number.isFinite(state.cam?.z) ? state.cam.z : 1,
+      };
+
+      return {
+        version: 1,
+
+        items: state.items,
+        nodes: state.nodes,
+        wires: state.wires,
+
+        selectedId: state.selectedId,
+        selectedWireSegment: state.selectedWireSegment,
+        lastTouched: state.lastTouched,
+
+        cam,
+        mode: state.mode,
+
+        savedAt: Date.now(),
+      };
+    }
+
+    function loadSnapshot(snap) {
+      if (!snap?.items || !snap?.nodes || !snap?.wires) {
+        setStatus("Circuit invalid");
+        return;
+      }
+
+      dispatch({ type: "SET_RUNNING", running: false });
+      dispatch({ type: "SET_SOLUTION", sol: null });
+      dispatch({ type: "SET_SAFETY_DIALOG", dialog: null });
+
+      dispatch({
+        type: "SET_ITEMS_NODES_WIRES",
+        items: snap.items,
+        nodes: snap.nodes,
+        wires: snap.wires,
+      });
+
+      dispatch({ type: "SET_SELECTED", id: snap.selectedId ?? null });
+
+      dispatch({
+        type: "SET_SELECTED_WIRE_SEGMENT",
+        segment: snap.selectedWireSegment ?? null,
+      });
+
+      dispatch({
+        type: "SET_LAST_TOUCHED",
+        target: snap.lastTouched ?? null,
+      });
+
+      dispatch({
+        type: "SET_CAM",
+        cam: snap.cam ?? { x: 0, y: 0, z: 1 },
+      });
+
+      dispatch({ type: "SET_MODE", mode: snap.mode ?? "select" });
+
+      dispatch({
+        type: "SET_WIRE_STATE",
+        wire: { startNodeId: null, points: [], previewWorld: null },
+      });
+
+      setStatus("Circuit încărcat");
+    }
+
     return {
       setMode,
       setStatus,
@@ -1266,6 +1351,9 @@ export function VoltLabProvider({ children }) {
 
       undo,
       redo,
+
+      getSnapshot,
+      loadSnapshot,
     };
   }, [state, history]);
 
