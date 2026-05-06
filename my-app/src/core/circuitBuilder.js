@@ -100,8 +100,11 @@ function itemPins(nodes, itemId) {
 
   const a = pins.find((p) => p.name === "a") || pins[0];
   const b = pins.find((p) => p.name === "b") || pins[1];
+  const base = pins.find((p) => p.name === "b") || null;
+  const collector = pins.find((p) => p.name === "c") || null;
+  const emitter = pins.find((p) => p.name === "e") || null;
 
-  return { a, b };
+  return { a, b, base, collector, emitter, pins };
 }
 
 // Rețea rezistivă pentru ohmmetru.
@@ -124,7 +127,7 @@ function buildResistanceNetworkForOhmmeter(items, nodes, wires, targetOhmmeterId
 
     if (na == null || nb == null) continue;
 
-    if (it.type === "resistor") {
+    if (it.type === "resistor" || it.type === "potentiometer") {
       resistors.push({
         a: na,
         b: nb,
@@ -298,153 +301,245 @@ export function solveNormalDC(items, nodes, wires) {
 
     const ground = 0;
 
-    const resistors = [];
-    const currentSources = [];
-    const voltageSources = [];
+    function netOf(node) {
+      if (!node) return null;
+      const n = nodeToNet.get(node.id);
+      return n == null ? null : n;
+    }
 
-    const batterySourceByItemId = new Map();
-    const capacitorSourceByItemId = new Map();
+    function buildModel(bias = {}) {
+      const resistors = [];
+      const currentSources = [];
+      const voltageSources = [];
+      const batterySourceByItemId = new Map();
+      const capacitorSourceByItemId = new Map();
+      const diodeMetaByItemId = new Map();
+      const transistorMetaByItemId = new Map();
 
-    for (const it of items) {
-      const { a, b } = itemPins(nodes, it.id);
-      if (!a || !b) continue;
-
-      const na = nodeToNet.get(a.id);
-      const nb = nodeToNet.get(b.id);
-
-      if (na == null || nb == null) continue;
-
-      if (it.type === "resistor") {
-        const R = safeResistance(it.R ?? 100, 100);
-
-        resistors.push({
-          a: na,
-          b: nb,
-          R,
-        });
+      function addResistor(a, b, R) {
+        if (a == null || b == null) return;
+        resistors.push({ a, b, R: safeResistance(R, 100) });
       }
 
-      if (it.type === "switch") {
-        if (it.closed) {
-          resistors.push({
-            a: na,
-            b: nb,
-            R: 1e-4,
-          });
-        }
-      }
-
-      if (it.type === "bulb") {
-        const Rb = safeResistance(it.R ?? 30, 30);
-
-        resistors.push({
-          a: na,
-          b: nb,
-          R: Rb,
-        });
-      }
-
-      if (it.type === "battery") {
-        const V = safeNumber(it.effectiveV ?? it.V ?? 9, 9);
-        const Rint = safeResistance(it.Rint ?? 0.2, 0.2);
-
+      function addSeriesVoltageResistor(a, b, V, R) {
         const sourceIndex = voltageSources.length;
         const internal = nodeCount + sourceIndex;
 
-        voltageSources.push({
-          a: na,
-          b: internal,
-          V,
-        });
+        voltageSources.push({ a, b: internal, V });
+        addResistor(internal, b, R);
 
-        resistors.push({
-          a: internal,
-          b: nb,
-          R: Rint,
-        });
-
-        batterySourceByItemId.set(it.id, {
-          sourceIndex,
-          V,
-          Rint,
-          aNet: na,
-          bNet: nb,
-          internalNet: internal,
-        });
+        return { sourceIndex, internalNet: internal };
       }
 
-      if (it.type === "capacitor") {
-        const Vcap = safeNumber(it.capVoltage ?? 0, 0);
-        const ESR = safeResistance(it.ESR ?? 0.5, 0.5);
+      for (const it of items) {
+        if (it.type === "transistor_npn" || it.type === "transistor_pnp") {
+          const { base, collector, emitter } = itemPins(nodes, it.id);
+          const nb = netOf(base);
+          const nc = netOf(collector);
+          const ne = netOf(emitter);
 
-        // Condensatorul încărcat devine o sursă temporară.
-        // Dacă e aproape gol, îl lăsăm open-circuit.
-        if (Math.abs(Vcap) > 0.001) {
-          const sourceIndex = voltageSources.length;
-          const internal = nodeCount + sourceIndex;
+          if (nb == null || nc == null || ne == null) continue;
 
-          voltageSources.push({
-            a: na,
-            b: internal,
-            V: Vcap,
+          const on = !!bias.transistorOn?.get(it.id);
+          const Rce = on
+            ? safeResistance(it.RonCE ?? 2, 2)
+            : safeResistance(it.RoffCE ?? 1000000000, 1000000000);
+
+          addResistor(nc, ne, Rce);
+
+          let baseSourceIndex = null;
+          if (on) {
+            const Vbe = safeNumber(it.Vbe ?? 0.7, 0.7);
+            const Rbe = safeResistance(it.Rbe ?? 100, 100);
+
+            if (it.type === "transistor_pnp") {
+              const meta = addSeriesVoltageResistor(ne, nb, Vbe, Rbe);
+              baseSourceIndex = meta.sourceIndex;
+            } else {
+              const meta = addSeriesVoltageResistor(nb, ne, Vbe, Rbe);
+              baseSourceIndex = meta.sourceIndex;
+            }
+          } else {
+            addResistor(nb, ne, safeResistance(it.Rbe ?? 100, 100));
+          }
+
+          transistorMetaByItemId.set(it.id, {
+            on,
+            baseSourceIndex,
+            baseNet: nb,
+            collectorNet: nc,
+            emitterNet: ne,
+            kind: it.type === "transistor_pnp" ? "PNP" : "NPN",
+            Rce,
           });
 
-          resistors.push({
-            a: internal,
-            b: nb,
-            R: ESR,
-          });
+          continue;
+        }
 
-          capacitorSourceByItemId.set(it.id, {
-            sourceIndex,
-            V: Vcap,
-            ESR,
+        const { a, b } = itemPins(nodes, it.id);
+        if (!a || !b) continue;
+
+        const na = netOf(a);
+        const nb = netOf(b);
+
+        if (na == null || nb == null) continue;
+
+        if (it.type === "resistor" || it.type === "potentiometer") {
+          addResistor(na, nb, it.R ?? 100);
+        }
+
+        if (it.type === "switch") {
+          if (it.closed) addResistor(na, nb, 1e-4);
+        }
+
+        if (it.type === "bulb") {
+          addResistor(na, nb, it.R ?? 30);
+        }
+
+        if (it.type === "battery") {
+          const V = safeNumber(it.effectiveV ?? it.V ?? 9, 9);
+          const Rint = safeResistance(it.Rint ?? 0.2, 0.2);
+          const meta = addSeriesVoltageResistor(na, nb, V, Rint);
+
+          batterySourceByItemId.set(it.id, {
+            sourceIndex: meta.sourceIndex,
+            V,
+            Rint,
             aNet: na,
             bNet: nb,
-            internalNet: internal,
+            internalNet: meta.internalNet,
           });
         }
 
-        // Dacă este neîncărcat și conectat la o sursă, încărcarea vizuală
-        // este calculată în useVoltLabStore/powerDynamics.
+        if (it.type === "capacitor") {
+          const Vcap = safeNumber(it.capVoltage ?? 0, 0);
+          const ESR = safeResistance(it.ESR ?? 0.5, 0.5);
+
+          if (Math.abs(Vcap) > 0.001) {
+            const meta = addSeriesVoltageResistor(na, nb, Vcap, ESR);
+
+            capacitorSourceByItemId.set(it.id, {
+              sourceIndex: meta.sourceIndex,
+              V: Vcap,
+              ESR,
+              aNet: na,
+              bNet: nb,
+              internalNet: meta.internalNet,
+            });
+          }
+        }
+
+        if (it.type === "diode") {
+          const active = !!bias.diodeOn?.get(it.id);
+          const Vf = safeNumber(it.Vf ?? 0.7, 0.7);
+          const Ron = safeResistance(it.Ron ?? 1, 1);
+          const Roff = safeResistance(it.Roff ?? 1000000000, 1000000000);
+          let sourceIndex = null;
+
+          if (active) {
+            const meta = addSeriesVoltageResistor(na, nb, Vf, Ron);
+            sourceIndex = meta.sourceIndex;
+          } else {
+            addResistor(na, nb, Roff);
+          }
+
+          diodeMetaByItemId.set(it.id, {
+            active,
+            sourceIndex,
+            aNet: na,
+            bNet: nb,
+            Vf,
+            Ron,
+            Roff,
+          });
+        }
+
+        if (it.type === "ammeter") {
+          addResistor(na, nb, 1e-4);
+        }
       }
 
-      if (it.type === "ammeter") {
+      const maxNodeIndex =
+        Math.max(
+          nodeCount - 1,
+          ...resistors.map((r) => Math.max(r.a, r.b)),
+          ...voltageSources.map((v) => Math.max(v.a, v.b))
+        ) + 1;
+
+      const GMIN_R = 1e12;
+
+      for (let i = 0; i < maxNodeIndex; i++) {
+        if (i === ground) continue;
+
         resistors.push({
-          a: na,
-          b: nb,
-          R: 1e-4,
+          a: i,
+          b: ground,
+          R: GMIN_R,
         });
       }
 
-      // voltmeter / ohmmeter nu afectează circuitul
+      return {
+        resistors,
+        currentSources,
+        voltageSources,
+        batterySourceByItemId,
+        capacitorSourceByItemId,
+        diodeMetaByItemId,
+        transistorMetaByItemId,
+        maxNodeIndex,
+      };
     }
 
-    const maxNodeIndex =
-      Math.max(
-        nodeCount - 1,
-        ...resistors.map((r) => Math.max(r.a, r.b)),
-        ...voltageSources.map((v) => Math.max(v.a, v.b))
-      ) + 1;
-
-    const GMIN_R = 1e12;
-
-    for (let i = 0; i < maxNodeIndex; i++) {
-      if (i === ground) continue;
-
-      resistors.push({
-        a: i,
-        b: ground,
-        R: GMIN_R,
-      });
-    }
-
-    const mna = solveMNA({
-      nodeCount: maxNodeIndex,
+    const firstModel = buildModel();
+    const firstMna = solveMNA({
+      nodeCount: firstModel.maxNodeIndex,
       ground,
-      resistors,
-      currentSources,
-      voltageSources,
+      resistors: firstModel.resistors,
+      currentSources: firstModel.currentSources,
+      voltageSources: firstModel.voltageSources,
+    });
+
+    const diodeOn = new Map();
+    const transistorOn = new Map();
+
+    function firstV(net) {
+      return firstMna?.V?.[net] ?? 0;
+    }
+
+    if (firstMna) {
+      for (const it of items) {
+        if (it.type === "diode") {
+          const { a, b } = itemPins(nodes, it.id);
+          const na = netOf(a);
+          const nb = netOf(b);
+          if (na != null && nb != null) {
+            const Vf = safeNumber(it.Vf ?? 0.7, 0.7);
+            diodeOn.set(it.id, firstV(na) - firstV(nb) >= Vf);
+          }
+        }
+
+        if (it.type === "transistor_npn" || it.type === "transistor_pnp") {
+          const { base, emitter } = itemPins(nodes, it.id);
+          const nb = netOf(base);
+          const ne = netOf(emitter);
+          if (nb != null && ne != null) {
+            const Vbe = safeNumber(it.Vbe ?? 0.7, 0.7);
+            const on = it.type === "transistor_pnp"
+              ? firstV(ne) - firstV(nb) >= Vbe
+              : firstV(nb) - firstV(ne) >= Vbe;
+            transistorOn.set(it.id, on);
+          }
+        }
+      }
+    }
+
+    const model = buildModel({ diodeOn, transistorOn });
+    const mna = solveMNA({
+      nodeCount: model.maxNodeIndex,
+      ground,
+      resistors: model.resistors,
+      currentSources: model.currentSources,
+      voltageSources: model.voltageSources,
     });
 
     if (!mna) {
@@ -461,11 +556,13 @@ export function solveNormalDC(items, nodes, wires) {
       nets,
       ground,
       mna,
-      voltageSources,
-      resistors,
+      voltageSources: model.voltageSources,
+      resistors: model.resistors,
       wires,
-      batterySourceByItemId,
-      capacitorSourceByItemId,
+      batterySourceByItemId: model.batterySourceByItemId,
+      capacitorSourceByItemId: model.capacitorSourceByItemId,
+      diodeMetaByItemId: model.diodeMetaByItemId,
+      transistorMetaByItemId: model.transistorMetaByItemId,
     };
   } catch (e) {
     return {
@@ -489,8 +586,8 @@ export function applySolutionToItems(items, nodes, sol) {
         copy.display = "—";
       }
 
-      if (copy.type === "bulb") {
-        copy.brightness = 0;
+      if (copy.type === "bulb" || copy.type === "potentiometer") {
+        if (copy.type === "bulb") copy.brightness = 0;
         copy.displayVoltage = "—";
         copy.displayCurrent = "—";
         copy.displayPower = "—";
@@ -510,6 +607,19 @@ export function applySolutionToItems(items, nodes, sol) {
         copy.displayPercent = "0%";
       }
 
+      if (copy.type === "diode") {
+        copy.displayState = "—";
+        copy.displayVoltage = "—";
+        copy.displayCurrent = "—";
+      }
+
+      if (copy.type === "transistor_npn" || copy.type === "transistor_pnp") {
+        copy.displayState = "—";
+        copy.displayVbe = "—";
+        copy.displayVce = "—";
+        copy.displayIc = "—";
+      }
+
       return copy;
     });
   }
@@ -520,20 +630,50 @@ export function applySolutionToItems(items, nodes, sol) {
     wires,
     batterySourceByItemId,
     capacitorSourceByItemId,
+    diodeMetaByItemId,
+    transistorMetaByItemId,
   } = sol;
 
   function V(net) {
     return mna?.V?.[net] ?? 0;
   }
 
+  function netOf(node) {
+    if (!node) return null;
+    const n = nodeToNet.get(node.id);
+    return n == null ? null : n;
+  }
+
   return items.map((it) => {
     const copy = { ...it };
+
+    if (copy.type === "transistor_npn" || copy.type === "transistor_pnp") {
+      const { base, collector, emitter } = itemPins(nodes, copy.id);
+      const nb = netOf(base);
+      const nc = netOf(collector);
+      const ne = netOf(emitter);
+      if (nb == null || nc == null || ne == null) return copy;
+
+      const meta = transistorMetaByItemId?.get(copy.id);
+      const isPnp = copy.type === "transistor_pnp";
+      const Vbe = isPnp ? V(ne) - V(nb) : V(nb) - V(ne);
+      const Vce = V(nc) - V(ne);
+      const Rce = meta?.Rce ?? safeResistance(copy.RoffCE ?? 1000000000, 1000000000);
+      const Ic = (V(nc) - V(ne)) / Rce;
+
+      copy.displayState = meta?.on ? "pornit" : "oprit";
+      copy.displayVbe = formatSignedValue(Vbe, "V");
+      copy.displayVce = formatSignedValue(Vce, "V");
+      copy.displayIc = formatSignedValue(Ic, "A");
+
+      return copy;
+    }
 
     const { a, b } = itemPins(nodes, it.id);
     if (!a || !b) return copy;
 
-    const na = nodeToNet.get(a.id);
-    const nb = nodeToNet.get(b.id);
+    const na = netOf(a);
+    const nb = netOf(b);
 
     if (na == null || nb == null) return copy;
 
@@ -555,6 +695,17 @@ export function applySolutionToItems(items, nodes, sol) {
       copy.displayPower = formatValue(power, "W");
 
       copy.brightness = Math.max(0, Math.min(1, power / Pnom));
+    }
+
+    if (copy.type === "potentiometer") {
+      const R = safeResistance(copy.R ?? 5000, 5000);
+      const voltage = Math.abs(dV);
+      const current = voltage / R;
+      const power = voltage * current;
+
+      copy.displayVoltage = formatValue(voltage, "V");
+      copy.displayCurrent = formatValue(current, "A");
+      copy.displayPower = formatValue(power, "W");
     }
 
     if (copy.type === "battery") {
@@ -581,8 +732,18 @@ export function applySolutionToItems(items, nodes, sol) {
       } else {
         copy.displayCurrent = "0.00A";
       }
+    }
 
-      // valorile de tensiune/sarcină/energie sunt actualizate în powerDynamics
+    if (copy.type === "diode") {
+      const meta = diodeMetaByItemId?.get(copy.id);
+      const active = !!meta?.active;
+      const current = active && meta?.sourceIndex != null
+        ? Math.abs(mna.Ivs?.[meta.sourceIndex] ?? 0)
+        : Math.abs(dV / safeResistance(copy.Roff ?? 1000000000, 1000000000));
+
+      copy.displayState = active ? "conduce" : "blocată";
+      copy.displayVoltage = formatSignedValue(dV, "V");
+      copy.displayCurrent = formatValue(current, "A");
     }
 
     if (copy.type === "voltmeter") {

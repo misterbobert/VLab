@@ -24,6 +24,13 @@ export const LIBRARY = [
         sprite: null,
       },
       {
+        type: "potentiometer",
+        label: "Potențiometru",
+        icon: "↗R",
+        meta: "rezistență variabilă",
+        sprite: null,
+      },
+      {
         type: "capacitor",
         label: "Condensator",
         icon: "C",
@@ -42,6 +49,33 @@ export const LIBRARY = [
         label: "Întrerupător",
         icon: "S",
         meta: "deschis/închis",
+        sprite: null,
+      },
+    ],
+  },
+  {
+    id: "semiconductors",
+    name: "Semiconductori",
+    items: [
+      {
+        type: "diode",
+        label: "Diodă",
+        icon: "▷|",
+        meta: "sens unic + Vf",
+        sprite: null,
+      },
+      {
+        type: "transistor_npn",
+        label: "Tranzistor NPN",
+        icon: "NPN",
+        meta: "B · C · E",
+        sprite: null,
+      },
+      {
+        type: "transistor_pnp",
+        label: "Tranzistor PNP",
+        icon: "PNP",
+        meta: "B · C · E",
         sprite: null,
       },
     ],

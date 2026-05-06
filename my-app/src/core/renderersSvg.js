@@ -311,6 +311,76 @@ export function batterySVG(V, Rint, socPct = 100, capacityMah = 2000) {
       fill="rgba(255,255,255,0.45)" font-family="ui-sans-serif,system-ui">Rint ${b}</text>
   </svg>`;
 }
+
+export function potentiometerSVG(R = 5000, Rmax = 10000, positionPct = 50) {
+  const txt = `${formatSI(R, "Ω")} / ${formatSI(Rmax, "Ω")}`;
+  const pos = Math.max(0, Math.min(100, Number(positionPct) || 0));
+  const knobX = 58 + (84 * pos) / 100;
+
+  return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+    <rect x="10" y="10" width="180" height="100" rx="20"
+      fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
+
+    <path d="M30 64 H58" stroke="rgba(255,255,255,0.82)" stroke-width="6" stroke-linecap="round"/>
+    <path d="M142 64 H170" stroke="rgba(255,255,255,0.82)" stroke-width="6" stroke-linecap="round"/>
+
+    <rect x="58" y="47" width="84" height="34" rx="10"
+      fill="rgba(0,0,0,0.26)" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
+
+    <path d="M${knobX.toFixed(1)} 28 L${knobX.toFixed(1)} 46" stroke="rgba(34,211,238,0.96)" stroke-width="4" stroke-linecap="round"/>
+    <path d="M${knobX.toFixed(1)} 28 L${(knobX - 12).toFixed(1)} 38 M${knobX.toFixed(1)} 28 L${(knobX + 12).toFixed(1)} 38"
+      stroke="rgba(34,211,238,0.96)" stroke-width="4" stroke-linecap="round"/>
+
+    <text x="100" y="103" text-anchor="middle" font-size="13"
+      fill="rgba(255,255,255,0.72)" font-family="ui-sans-serif,system-ui">${txt}</text>
+  </svg>`;
+}
+
+export function diodeSVG(conducting = false, Vf = 0.7) {
+  const state = conducting ? "conduce" : "blocată";
+  const color = conducting ? "rgba(74,222,128,0.95)" : "rgba(255,255,255,0.84)";
+
+  return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+    <rect x="10" y="10" width="180" height="100" rx="20"
+      fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
+
+    <path d="M28 60 H66" stroke="rgba(255,255,255,0.82)" stroke-width="6" stroke-linecap="round"/>
+    <path d="M134 60 H172" stroke="rgba(255,255,255,0.82)" stroke-width="6" stroke-linecap="round"/>
+
+    <path d="M70 35 L118 60 L70 85 Z" fill="rgba(34,211,238,0.13)" stroke="${color}" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M126 34 V86" stroke="${color}" stroke-width="5" stroke-linecap="round"/>
+
+    <text x="100" y="103" text-anchor="middle" font-size="13"
+      fill="rgba(255,255,255,0.72)" font-family="ui-sans-serif,system-ui">${state} · Vf ${Number(Vf || 0.7).toFixed(2)}V</text>
+  </svg>`;
+}
+
+export function transistorSVG(kind = "NPN", on = false) {
+  const k = String(kind).toUpperCase() === "PNP" ? "PNP" : "NPN";
+  const accent = on ? "rgba(74,222,128,0.95)" : "rgba(34,211,238,0.82)";
+  const arrow = k === "NPN"
+    ? `<path d="M122 77 L144 92 M144 92 L139 77 M144 92 L128 88" stroke="${accent}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`
+    : `<path d="M144 92 L122 77 M122 77 L139 77 M122 77 L128 88" stroke="${accent}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
+
+  return `<svg viewBox="0 0 200 140" xmlns="http://www.w3.org/2000/svg">
+    <rect x="10" y="10" width="180" height="120" rx="22"
+      fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)"/>
+
+    <circle cx="100" cy="70" r="42" fill="rgba(0,0,0,0.20)" stroke="rgba(255,255,255,0.16)" stroke-width="2"/>
+    <path d="M28 70 H74" stroke="rgba(255,255,255,0.84)" stroke-width="6" stroke-linecap="round"/>
+    <path d="M126 47 L168 34" stroke="rgba(255,255,255,0.84)" stroke-width="6" stroke-linecap="round"/>
+    <path d="M126 93 L168 106" stroke="rgba(255,255,255,0.84)" stroke-width="6" stroke-linecap="round"/>
+    <path d="M76 42 V98" stroke="rgba(255,255,255,0.86)" stroke-width="5" stroke-linecap="round"/>
+    <path d="M76 55 L126 47 M76 85 L126 93" stroke="rgba(255,255,255,0.86)" stroke-width="5" stroke-linecap="round"/>
+    ${arrow}
+
+    <text x="39" y="62" text-anchor="middle" font-size="12" fill="rgba(255,255,255,0.72)" font-family="ui-sans-serif,system-ui">B</text>
+    <text x="166" y="23" text-anchor="middle" font-size="12" fill="rgba(255,255,255,0.72)" font-family="ui-sans-serif,system-ui">C</text>
+    <text x="166" y="124" text-anchor="middle" font-size="12" fill="rgba(255,255,255,0.72)" font-family="ui-sans-serif,system-ui">E</text>
+    <text x="100" y="124" text-anchor="middle" font-size="13" fill="rgba(255,255,255,0.72)" font-family="ui-sans-serif,system-ui">${k} · ${on ? "pornit" : "oprit"}</text>
+  </svg>`;
+}
+
 export function schematicSVG(item, label) {
   const type = item.type;
 
@@ -325,6 +395,18 @@ export function schematicSVG(item, label) {
 
     if (type === "resistor") {
       return formatSI(item.R ?? 100, "Ω");
+    }
+
+    if (type === "potentiometer") {
+      return formatSI(item.R ?? 5000, "Ω");
+    }
+
+    if (type === "diode") {
+      return item.displayState === "conduce" ? `ON · ${formatSI(item.Vf ?? 0.7, "V")}` : `OFF · ${formatSI(item.Vf ?? 0.7, "V")}`;
+    }
+
+    if (type === "transistor_npn" || type === "transistor_pnp") {
+      return `${item.type === "transistor_pnp" ? "PNP" : "NPN"} · ${item.displayState ?? "—"}`;
     }
 
     if (type === "capacitor") {
@@ -383,6 +465,55 @@ export function schematicSVG(item, label) {
 
       <rect x="58" y="45" width="84" height="34" rx="3"
         fill="rgba(255,255,255,0.03)" stroke="${stroke}" stroke-width="4"/>
+    </svg>`;
+  }
+
+  if (type === "potentiometer") {
+    return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+      ${baseText}
+
+      <path d="M25 62 H58" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M142 62 H175" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+
+      <rect x="58" y="45" width="84" height="34" rx="3"
+        fill="rgba(255,255,255,0.03)" stroke="${stroke}" stroke-width="4"/>
+
+      <path d="M114 30 L84 58" stroke="${accent}" stroke-width="4" stroke-linecap="round"/>
+      <path d="M114 30 L102 33 M114 30 L111 42" stroke="${accent}" stroke-width="4" stroke-linecap="round"/>
+    </svg>`;
+  }
+
+  if (type === "diode") {
+    return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+      ${baseText}
+
+      <path d="M25 62 H70" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M130 62 H175" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M72 38 L118 62 L72 86 Z" fill="rgba(255,255,255,0.03)" stroke="${stroke}" stroke-width="4" stroke-linejoin="round"/>
+      <path d="M126 36 V88" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+    </svg>`;
+  }
+
+  if (type === "transistor_npn" || type === "transistor_pnp") {
+    const isPnp = type === "transistor_pnp";
+    const arrow = isPnp
+      ? `<path d="M142 92 L118 76 M118 76 L136 75 M118 76 L126 91" stroke="${stroke}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`
+      : `<path d="M118 76 L142 92 M142 92 L136 75 M142 92 L126 91" stroke="${stroke}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
+
+    return `<svg viewBox="0 0 200 140" xmlns="http://www.w3.org/2000/svg">
+      <text x="100" y="20" text-anchor="middle" font-size="15" fill="${accent}" font-family="ui-sans-serif, system-ui" font-weight="800">${label}</text>
+      <text x="100" y="130" text-anchor="middle" font-size="13" fill="${muted}" font-family="ui-sans-serif, system-ui">${value}</text>
+
+      <circle cx="100" cy="70" r="38" fill="rgba(255,255,255,0.02)" stroke="${stroke}" stroke-width="3"/>
+      <path d="M25 70 H76" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M124 46 L175 34" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M124 94 L175 106" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M78 42 V98" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M78 56 L124 46 M78 84 L124 94" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      ${arrow}
+      <text x="35" y="58" text-anchor="middle" font-size="12" fill="${muted}" font-family="ui-sans-serif, system-ui">B</text>
+      <text x="169" y="24" text-anchor="middle" font-size="12" fill="${muted}" font-family="ui-sans-serif, system-ui">C</text>
+      <text x="169" y="124" text-anchor="middle" font-size="12" fill="${muted}" font-family="ui-sans-serif, system-ui">E</text>
     </svg>`;
   }
 

@@ -58,9 +58,20 @@ function pct(value) {
   return `${Math.round(Math.max(0, Math.min(1, n)) * 100)}%`;
 }
 
+function potentiometerResistance(min, max, posPct) {
+  const lo = Math.max(0, Number(min) || 0);
+  const hi = Math.max(lo + 0.001, Number(max) || 10000);
+  const pos = Math.max(0, Math.min(100, Number(posPct) || 0));
+  return lo + ((hi - lo) * pos) / 100;
+}
+
 function displayName(type) {
   if (type === "battery") return "Baterie";
   if (type === "resistor") return "Rezistor";
+  if (type === "potentiometer") return "Potențiometru";
+  if (type === "diode") return "Diodă";
+  if (type === "transistor_npn") return "Tranzistor NPN";
+  if (type === "transistor_pnp") return "Tranzistor PNP";
   if (type === "capacitor") return "Condensator";
   if (type === "switch") return "Întrerupător";
   if (type === "bulb") return "Bec";
@@ -284,6 +295,240 @@ export default function Inspector() {
             </Section>
           )}
 
+
+
+          {selected.type === "potentiometer" && (
+            <>
+              <Section title="Specificații potențiometru">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Rezistență minimă (Ω)">
+                      <Input
+                        type="number"
+                        step="1"
+                        min="0"
+                        value={selected.Rmin ?? 0}
+                        onChange={(v) => {
+                          const Rmin = clampNumber(v, selected.Rmin ?? 0, 0);
+                          const Rmax = Math.max(Rmin + 0.001, Number(selected.Rmax ?? 10000));
+                          const positionPct = clampNumber(selected.positionPct ?? 50, 50, 0, 100);
+
+                          actions.updateItem(selected.id, {
+                            Rmin,
+                            Rmax,
+                            R: potentiometerResistance(Rmin, Rmax, positionPct),
+                          });
+                        }}
+                      />
+                    </Field>
+
+                    <Field label="Rezistență maximă (Ω)">
+                      <Input
+                        type="number"
+                        step="100"
+                        min="0.001"
+                        value={selected.Rmax ?? 10000}
+                        onChange={(v) => {
+                          const Rmin = Math.max(0, Number(selected.Rmin ?? 0));
+                          const Rmax = clampNumber(v, selected.Rmax ?? 10000, Rmin + 0.001);
+                          const positionPct = clampNumber(selected.positionPct ?? 50, 50, 0, 100);
+
+                          actions.updateItem(selected.id, {
+                            Rmax,
+                            R: potentiometerResistance(Rmin, Rmax, positionPct),
+                          });
+                        }}
+                      />
+                    </Field>
+                  </div>
+
+                  <Field label={`Cursor / poziție: ${Math.round(selected.positionPct ?? 50)}%`}>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={selected.positionPct ?? 50}
+                      onChange={(e) => {
+                        const positionPct = clampNumber(e.target.value, selected.positionPct ?? 50, 0, 100);
+                        const Rmin = Math.max(0, Number(selected.Rmin ?? 0));
+                        const Rmax = Math.max(Rmin + 0.001, Number(selected.Rmax ?? 10000));
+
+                        actions.updateItem(selected.id, {
+                          positionPct,
+                          R: potentiometerResistance(Rmin, Rmax, positionPct),
+                        });
+                      }}
+                      className="w-full accent-cyan-300"
+                    />
+                  </Field>
+
+                  <Readout label="Rezistență actuală" value={`${Number(selected.R ?? 5000).toFixed(2)}Ω`} />
+                </div>
+              </Section>
+
+              <Section title="Rezultate potențiometru">
+                <div className="grid grid-cols-3 gap-3">
+                  <Readout label="Tensiune" value={selected.displayVoltage ?? "—"} />
+                  <Readout label="Curent" value={selected.displayCurrent ?? "—"} />
+                  <Readout label="Putere" value={selected.displayPower ?? "—"} />
+                </div>
+              </Section>
+            </>
+          )}
+
+          {selected.type === "diode" && (
+            <>
+              <Section title="Specificații diodă">
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Prag Vf (V)">
+                    <Input
+                      type="number"
+                      step="0.05"
+                      min="0"
+                      value={selected.Vf ?? 0.7}
+                      onChange={(v) =>
+                        actions.updateItem(selected.id, {
+                          Vf: clampNumber(v, selected.Vf ?? 0.7, 0),
+                        })
+                      }
+                    />
+                  </Field>
+
+                  <Field label="Rezistență directă Ron (Ω)">
+                    <Input
+                      type="number"
+                      step="0.1"
+                      min="0.001"
+                      value={selected.Ron ?? 1}
+                      onChange={(v) =>
+                        actions.updateItem(selected.id, {
+                          Ron: clampNumber(v, selected.Ron ?? 1, 0.001),
+                        })
+                      }
+                    />
+                  </Field>
+
+                  <Field label="Rezistență inversă Roff (Ω)">
+                    <Input
+                      type="number"
+                      step="1000000"
+                      min="1"
+                      value={selected.Roff ?? 1000000000}
+                      onChange={(v) =>
+                        actions.updateItem(selected.id, {
+                          Roff: clampNumber(v, selected.Roff ?? 1000000000, 1),
+                        })
+                      }
+                    />
+                  </Field>
+
+                  <Readout label="Stare" value={selected.displayState ?? "—"} />
+                </div>
+              </Section>
+
+              <Section title="Rezultate diodă">
+                <div className="grid grid-cols-2 gap-3">
+                  <Readout label="Tensiune A-K" value={selected.displayVoltage ?? "—"} />
+                  <Readout label="Curent" value={selected.displayCurrent ?? "—"} />
+                </div>
+              </Section>
+            </>
+          )}
+
+          {(selected.type === "transistor_npn" || selected.type === "transistor_pnp") && (
+            <>
+              <Section title={`Specificații ${selected.type === "transistor_pnp" ? "PNP" : "NPN"}`}>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Amplificare beta / hFE">
+                    <Input
+                      type="number"
+                      step="1"
+                      min="1"
+                      value={selected.beta ?? 100}
+                      onChange={(v) =>
+                        actions.updateItem(selected.id, {
+                          beta: clampNumber(v, selected.beta ?? 100, 1),
+                        })
+                      }
+                    />
+                  </Field>
+
+                  <Field label="Prag bază-emitor Vbe (V)">
+                    <Input
+                      type="number"
+                      step="0.05"
+                      min="0"
+                      value={selected.Vbe ?? 0.7}
+                      onChange={(v) =>
+                        actions.updateItem(selected.id, {
+                          Vbe: clampNumber(v, selected.Vbe ?? 0.7, 0),
+                        })
+                      }
+                    />
+                  </Field>
+
+                  <Field label="Rezistență C-E pornit (Ω)">
+                    <Input
+                      type="number"
+                      step="0.1"
+                      min="0.001"
+                      value={selected.RonCE ?? 2}
+                      onChange={(v) =>
+                        actions.updateItem(selected.id, {
+                          RonCE: clampNumber(v, selected.RonCE ?? 2, 0.001),
+                        })
+                      }
+                    />
+                  </Field>
+
+                  <Field label="Rezistență C-E oprit (Ω)">
+                    <Input
+                      type="number"
+                      step="1000000"
+                      min="1"
+                      value={selected.RoffCE ?? 1000000000}
+                      onChange={(v) =>
+                        actions.updateItem(selected.id, {
+                          RoffCE: clampNumber(v, selected.RoffCE ?? 1000000000, 1),
+                        })
+                      }
+                    />
+                  </Field>
+
+                  <Field label="Rezistență bază (Ω)">
+                    <Input
+                      type="number"
+                      step="100"
+                      min="1"
+                      value={selected.Rbe ?? 100}
+                      onChange={(v) =>
+                        actions.updateItem(selected.id, {
+                          Rbe: clampNumber(v, selected.Rbe ?? 100, 1),
+                        })
+                      }
+                    />
+                  </Field>
+
+                  <Readout label="Stare" value={selected.displayState ?? "—"} />
+                </div>
+              </Section>
+
+              <Section title="Rezultate tranzistor">
+                <div className="grid grid-cols-3 gap-3">
+                  <Readout label="Vbe" value={selected.displayVbe ?? "—"} />
+                  <Readout label="Vce" value={selected.displayVce ?? "—"} />
+                  <Readout label="Ic" value={selected.displayIc ?? "—"} />
+                </div>
+              </Section>
+
+              <div className="rounded-2xl border border-violet-300/15 bg-violet-300/10 p-3 text-xs leading-relaxed text-violet-100/80">
+                Model didactic simplificat: baza decide dacă tranzistorul este
+                pornit, iar între colector și emitor apare o rezistență mică
+                sau foarte mare.
+              </div>
+            </>
+          )}
           {selected.type === "capacitor" && (
             <>
               <Section title="Specificații condensator">

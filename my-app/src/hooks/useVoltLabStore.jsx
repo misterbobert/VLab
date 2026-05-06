@@ -135,6 +135,25 @@ function resetCalculatedValues(items) {
       copy.displayPower = "—";
     }
 
+    if (copy.type === "potentiometer") {
+      copy.displayVoltage = "—";
+      copy.displayCurrent = "—";
+      copy.displayPower = "—";
+    }
+
+    if (copy.type === "diode") {
+      copy.displayState = "—";
+      copy.displayVoltage = "—";
+      copy.displayCurrent = "—";
+    }
+
+    if (copy.type === "transistor_npn" || copy.type === "transistor_pnp") {
+      copy.displayState = "—";
+      copy.displayVbe = "—";
+      copy.displayVce = "—";
+      copy.displayIc = "—";
+    }
+
     if (copy.type === "battery") {
       copy.displayCurrent = "—";
       copy.displayPower = "—";
@@ -1340,9 +1359,17 @@ export function VoltLabProvider({ children }) {
         target: snap.lastTouched ?? null,
       });
 
+      const nextCam = snap.autoCenter
+        ? {
+            x: Math.round(window.innerWidth / 2),
+            y: Math.round(window.innerHeight / 2),
+            z: snap.cam?.z ?? 0.85,
+          }
+        : snap.cam ?? { x: 0, y: 0, z: 1 };
+
       dispatch({
         type: "SET_CAM",
-        cam: snap.cam ?? { x: 0, y: 0, z: 1 },
+        cam: nextCam,
       });
 
       dispatch({ type: "SET_MODE", mode: snap.mode ?? "select" });

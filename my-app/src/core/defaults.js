@@ -2,6 +2,9 @@
 import { uid } from "./utils";
 import {
   resistorSVG,
+  potentiometerSVG,
+  diodeSVG,
+  transistorSVG,
   meterSVG,
   switchSVG,
   bulbSVG,
@@ -48,6 +51,50 @@ export function defaultPropsForType(type) {
   if (type === "resistor") {
     return {
       R: 100,
+      sizePct: 100,
+      rot: 0,
+    };
+  }
+
+  if (type === "potentiometer") {
+    return {
+      Rmin: 0,
+      Rmax: 10000,
+      positionPct: 50,
+      R: 5000,
+      displayVoltage: "—",
+      displayCurrent: "—",
+      displayPower: "—",
+      sizePct: 100,
+      rot: 0,
+    };
+  }
+
+  if (type === "diode") {
+    return {
+      Vf: 0.7,
+      Ron: 1,
+      Roff: 1000000000,
+      displayState: "—",
+      displayVoltage: "—",
+      displayCurrent: "—",
+      sizePct: 100,
+      rot: 0,
+    };
+  }
+
+  if (type === "transistor_npn" || type === "transistor_pnp") {
+    return {
+      kind: type === "transistor_pnp" ? "PNP" : "NPN",
+      beta: 100,
+      Vbe: 0.7,
+      RonCE: 2,
+      RoffCE: 1000000000,
+      Rbe: 100,
+      displayState: "—",
+      displayVbe: "—",
+      displayVce: "—",
+      displayIc: "—",
       sizePct: 100,
       rot: 0,
     };
@@ -205,26 +252,60 @@ export function makeItemWithNodes(type, x, y, props = {}) {
 
   const dx = 80;
 
-  let nodes = [
-    {
-      id: uid("n"),
-      itemId: id,
-      name: "a",
-      lx: -dx,
-      ly: 0,
-      x,
-      y,
-    },
-    {
-      id: uid("n"),
-      itemId: id,
-      name: "b",
-      lx: dx,
-      ly: 0,
-      x,
-      y,
-    },
-  ];
+  let nodes;
+
+  if (type === "transistor_npn" || type === "transistor_pnp") {
+    nodes = [
+      {
+        id: uid("n"),
+        itemId: id,
+        name: "b",
+        lx: -80,
+        ly: 0,
+        x,
+        y,
+      },
+      {
+        id: uid("n"),
+        itemId: id,
+        name: "c",
+        lx: 72,
+        ly: -36,
+        x,
+        y,
+      },
+      {
+        id: uid("n"),
+        itemId: id,
+        name: "e",
+        lx: 72,
+        ly: 36,
+        x,
+        y,
+      },
+    ];
+  } else {
+    nodes = [
+      {
+        id: uid("n"),
+        itemId: id,
+        name: "a",
+        lx: -dx,
+        ly: 0,
+        x,
+        y,
+      },
+      {
+        id: uid("n"),
+        itemId: id,
+        name: "b",
+        lx: dx,
+        ly: 0,
+        x,
+        y,
+      },
+    ];
+  }
 
   nodes = recalcItemNodes(item, nodes);
 
@@ -246,6 +327,18 @@ export function renderItemSVG(it) {
 
   if (it.type === "resistor") {
     return resistorSVG(it.R ?? 100);
+  }
+
+  if (it.type === "potentiometer") {
+    return potentiometerSVG(it.R ?? 5000, it.Rmax ?? 10000, it.positionPct ?? 50);
+  }
+
+  if (it.type === "diode") {
+    return diodeSVG(it.displayState === "conduce", it.Vf ?? 0.7);
+  }
+
+  if (it.type === "transistor_npn" || it.type === "transistor_pnp") {
+    return transistorSVG(it.type === "transistor_pnp" ? "PNP" : "NPN", it.displayState === "pornit");
   }
 
   if (it.type === "capacitor") {

@@ -1,6 +1,9 @@
 import {
   batterySVG,
   resistorSVG,
+  potentiometerSVG,
+  diodeSVG,
+  transistorSVG,
   bulbSVG,
   switchSVG,
   meterSVG,
@@ -32,6 +35,10 @@ export function getCircuitLabel(item, items = []) {
   const prefixes = {
     battery: "E",
     resistor: "R",
+    potentiometer: "P",
+    diode: "D",
+    transistor_npn: "Q",
+    transistor_pnp: "Q",
     capacitor: "C",
     bulb: "L",
     switch: "K",
@@ -58,6 +65,13 @@ function getSchematicValue(item) {
       return formatSI(item.effectiveV ?? item.V ?? 9, "V");
     case "resistor":
       return formatSI(item.R ?? 100, "Ω");
+    case "potentiometer":
+      return formatSI(item.R ?? 5000, "Ω");
+    case "diode":
+      return item.displayState === "conduce" ? `ON · ${formatSI(item.Vf ?? 0.7, "V")}` : `OFF · ${formatSI(item.Vf ?? 0.7, "V")}`;
+    case "transistor_npn":
+    case "transistor_pnp":
+      return `${item.type === "transistor_pnp" ? "PNP" : "NPN"} · ${item.displayState ?? "—"}`;
     case "capacitor":
       return formatSI(item.C ?? 0.001, "F");
     case "bulb":
@@ -142,6 +156,100 @@ function drawSchematicComponent(ctx, item, cam, allItems = []) {
     roundRectPath(ctx, -42, -18, 84, 36, 4);
     ctx.fill();
     ctx.stroke();
+  } else if (item.type === "potentiometer") {
+    ctx.beginPath();
+    ctx.moveTo(-80, 0);
+    ctx.lineTo(-42, 0);
+    ctx.moveTo(42, 0);
+    ctx.lineTo(80, 0);
+    ctx.stroke();
+
+    ctx.lineWidth = 4;
+    ctx.fillStyle = "rgba(255,255,255,0.025)";
+    ctx.strokeStyle = stroke;
+    roundRectPath(ctx, -42, -18, 84, 36, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.strokeStyle = accent;
+    ctx.beginPath();
+    ctx.moveTo(16, -34);
+    ctx.lineTo(-16, -4);
+    ctx.moveTo(16, -34);
+    ctx.lineTo(4, -31);
+    ctx.moveTo(16, -34);
+    ctx.lineTo(13, -22);
+    ctx.stroke();
+  } else if (item.type === "diode") {
+    ctx.beginPath();
+    ctx.moveTo(-80, 0);
+    ctx.lineTo(-28, 0);
+    ctx.moveTo(28, 0);
+    ctx.lineTo(80, 0);
+    ctx.stroke();
+
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(-28, -26);
+    ctx.lineTo(18, 0);
+    ctx.lineTo(-28, 26);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(255,255,255,0.025)";
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(28, -28);
+    ctx.lineTo(28, 28);
+    ctx.stroke();
+  } else if (item.type === "transistor_npn" || item.type === "transistor_pnp") {
+    const isPnp = item.type === "transistor_pnp";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(0, 0, 38, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.02)";
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(-80, 0); // B
+    ctx.lineTo(-22, 0);
+    ctx.moveTo(24, -36); // C
+    ctx.lineTo(80, -36);
+    ctx.moveTo(24, 36); // E
+    ctx.lineTo(80, 36);
+    ctx.moveTo(-22, -34);
+    ctx.lineTo(-22, 34);
+    ctx.moveTo(-22, -17);
+    ctx.lineTo(24, -36);
+    ctx.moveTo(-22, 17);
+    ctx.lineTo(24, 36);
+    ctx.stroke();
+
+    ctx.beginPath();
+    if (isPnp) {
+      ctx.moveTo(43, 36);
+      ctx.lineTo(15, 23);
+      ctx.moveTo(15, 23);
+      ctx.lineTo(31, 21);
+      ctx.moveTo(15, 23);
+      ctx.lineTo(24, 36);
+    } else {
+      ctx.moveTo(15, 23);
+      ctx.lineTo(43, 36);
+      ctx.moveTo(43, 36);
+      ctx.lineTo(31, 21);
+      ctx.moveTo(43, 36);
+      ctx.lineTo(24, 36);
+    }
+    ctx.stroke();
+
+    ctx.font = "800 12px ui-sans-serif, system-ui";
+    ctx.fillStyle = muted;
+    ctx.fillText("B", -68, -14);
+    ctx.fillText("C", 70, -52);
+    ctx.fillText("E", 70, 52);
   } else if (item.type === "capacitor") {
     ctx.beginPath();
     ctx.moveTo(-80, 0);
@@ -271,6 +379,22 @@ export function renderComponentCanvas(
       svg = resistorSVG(item.R ?? 100);
       break;
 
+    case "potentiometer":
+      svg = potentiometerSVG(item.R ?? 5000, item.Rmax ?? 10000, item.positionPct ?? 50);
+      break;
+
+    case "diode":
+      svg = diodeSVG(item.displayState === "conduce", item.Vf ?? 0.7);
+      break;
+
+    case "transistor_npn":
+      svg = transistorSVG("NPN", item.displayState === "pornit");
+      break;
+
+    case "transistor_pnp":
+      svg = transistorSVG("PNP", item.displayState === "pornit");
+      break;
+
     case "capacitor":
       svg = capacitorSVG(
         item.capVoltage ?? 0,
@@ -310,9 +434,10 @@ export function renderComponentCanvas(
   const img = getCachedImage(svg);
 
   const isPortrait = item.type === "capacitor";
+  const isTall = item.type === "transistor_npn" || item.type === "transistor_pnp";
 
   const w = (isPortrait ? 150 : 200) * scale;
-  const h = (isPortrait ? 170 : 120) * scale;
+  const h = (isPortrait ? 170 : isTall ? 140 : 120) * scale;
 
   ctx.save();
   ctx.translate(x, y);
