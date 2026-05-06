@@ -22,11 +22,20 @@ import { detectCircuitWarnings } from "../core/safetyChecks";
 
 const Ctx = createContext(null);
 
+function getInitialRenderStyle() {
+  if (typeof window === "undefined") return "real";
+
+  return localStorage.getItem("voltlab:renderStyle") === "schematic"
+    ? "schematic"
+    : "real";
+}
+
 const initialState = {
   mode: "select",
   running: false,
   isRunning: false,
   statusText: "Ready",
+  renderStyle: getInitialRenderStyle(),
 
   items: [],
   nodes: [],
@@ -191,6 +200,20 @@ function reducer(state, action) {
         ...state,
         statusText: action.text,
       };
+
+    case "SET_RENDER_STYLE": {
+      const renderStyle =
+        action.renderStyle === "schematic" ? "schematic" : "real";
+
+      if (typeof window !== "undefined") {
+        localStorage.setItem("voltlab:renderStyle", renderStyle);
+      }
+
+      return {
+        ...state,
+        renderStyle,
+      };
+    }
 
     case "SET_CAM":
       return {
@@ -455,6 +478,21 @@ export function VoltLabProvider({ children }) {
     function setMode(mode) {
       dispatch({ type: "SET_MODE", mode });
       setStatus(mode === "wire" ? "Wire mode" : "Select mode");
+    }
+
+    function setRenderStyle(renderStyle) {
+      const nextStyle = renderStyle === "schematic" ? "schematic" : "real";
+
+      dispatch({
+        type: "SET_RENDER_STYLE",
+        renderStyle: nextStyle,
+      });
+
+      setStatus(
+        nextStyle === "schematic"
+          ? "Mod schemă de fizică"
+          : "Mod vizual realist"
+      );
     }
 
     function setCam(patch) {
@@ -1319,6 +1357,7 @@ export function VoltLabProvider({ children }) {
 
     return {
       setMode,
+      setRenderStyle,
       setStatus,
       setCam,
 

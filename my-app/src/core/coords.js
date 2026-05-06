@@ -157,7 +157,7 @@ function drawWirePath(ctx, pts) {
   ctx.stroke();
 }
 
-export function drawWires(ctx, nodes, wires, cam, wireState) {
+export function drawWires(ctx, nodes, wires, cam, wireState, renderStyle = "real") {
   ctx.save();
 
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
@@ -185,19 +185,28 @@ export function drawWires(ctx, nodes, wires, cam, wireState) {
       b,
     ];
 
-    ctx.lineWidth = 7;
-    ctx.strokeStyle = "rgba(70,160,255,0.13)";
-    drawWirePath(ctx, pts);
+    if (renderStyle === "schematic") {
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(255,255,255,0.90)";
+      drawWirePath(ctx, pts);
+    } else {
+      ctx.lineWidth = 7;
+      ctx.strokeStyle = "rgba(70,160,255,0.13)";
+      drawWirePath(ctx, pts);
 
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(120,200,255,0.88)";
-    drawWirePath(ctx, pts);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(120,200,255,0.88)";
+      drawWirePath(ctx, pts);
+    }
   }
 
   const activeNodeId = wireState?.startNodeId ?? null;
 
-  // nodes
-  for (const n of nodes) {
+  // În modul schematic nu desenăm cerculețele pinilor/joncțiunilor
+  // și nici badge-urile +/−, ca să arate ca o schemă de fizică.
+  if (renderStyle !== "schematic") {
+    // nodes
+    for (const n of nodes) {
     const p = worldToScreen(n.x, n.y, cam);
     const active = n.id === activeNodeId;
 
@@ -219,6 +228,8 @@ export function drawWires(ctx, nodes, wires, cam, wireState) {
     if (sign) {
       drawBadge(ctx, p.x, p.y - 14, sign);
     }
+  }
+
   }
 
   // preview wire

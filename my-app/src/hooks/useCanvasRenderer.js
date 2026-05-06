@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useVoltLab } from "./useVoltLabStore.jsx";
 import { drawInfiniteGrid, drawWires } from "../core/coords";
+import { renderComponentCanvas } from "../core/renderComponentCanvas";
 
 export function useCanvasRenderer(canvasRef) {
   const { state } = useVoltLab();
@@ -46,7 +47,23 @@ export function useCanvasRenderer(canvasRef) {
     drawInfiniteGrid(ctx, canvas.clientWidth, canvas.clientHeight, state.cam);
 
     // wires
-    drawWires(ctx, state.nodes, state.wires, state.cam, state.wire);
+    drawWires(ctx, state.nodes, state.wires, state.cam, state.wire, state.renderStyle);
 
-  }, [canvasRef, state.cam, state.nodes, state.wires, state.wire]);
+    // În modul schematic, componentele se desenează pe canvas.
+    // Overlay-ul vechi rămâne invizibil doar pentru interacțiuni.
+    if (state.renderStyle === "schematic") {
+      for (const item of state.items) {
+        renderComponentCanvas(ctx, item, state.cam, "schematic", state.items);
+      }
+    }
+
+  }, [
+    canvasRef,
+    state.cam,
+    state.nodes,
+    state.wires,
+    state.wire,
+    state.items,
+    state.renderStyle,
+  ]);
 }

@@ -9,7 +9,7 @@ export default function Workspace() {
   const workspaceRef = useRef(null);
   const overlayRef = useRef(null);
 
-  const { actions } = useVoltLab();
+  const { state, actions } = useVoltLab();
   useWorkspaceEvents(workspaceRef, overlayRef);
 
   return (
@@ -20,7 +20,17 @@ export default function Workspace() {
       onDrop={(e) => actions.handleDrop(e, workspaceRef)}
     >
       <CanvasStage />
-      <Overlay overlayRef={overlayRef} />
+
+      <div
+        className={
+          state.renderStyle === "schematic"
+            ? "absolute inset-0 opacity-0"
+            : "absolute inset-0"
+        }
+      >
+        <Overlay overlayRef={overlayRef} />
+      </div>
+
       <HintBar />
     </div>
   );

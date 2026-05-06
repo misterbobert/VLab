@@ -311,3 +311,145 @@ export function batterySVG(V, Rint, socPct = 100, capacityMah = 2000) {
       fill="rgba(255,255,255,0.45)" font-family="ui-sans-serif,system-ui">Rint ${b}</text>
   </svg>`;
 }
+export function schematicSVG(item, label) {
+  const type = item.type;
+
+  const stroke = "rgba(255,255,255,0.92)";
+  const muted = "rgba(255,255,255,0.68)";
+  const accent = "rgba(34,211,238,0.95)";
+
+  function valueText() {
+    if (type === "battery") {
+      return formatSI(item.effectiveV ?? item.V ?? 9, "V");
+    }
+
+    if (type === "resistor") {
+      return formatSI(item.R ?? 100, "Ω");
+    }
+
+    if (type === "capacitor") {
+      return formatSI(item.C ?? 0.001, "F");
+    }
+
+    if (type === "bulb") {
+      const p = item.displayPower && item.displayPower !== "—" ? item.displayPower : null;
+      return p ?? formatSI(item.R ?? 30, "Ω");
+    }
+
+    if (type === "switch") {
+      return item.closed ? "închis" : "deschis";
+    }
+
+    if (type === "voltmeter" || type === "ammeter" || type === "ohmmeter") {
+      return item.display ?? "—";
+    }
+
+    return "";
+  }
+
+  const value = valueText();
+
+  const baseText = `
+    <text x="100" y="22" text-anchor="middle" font-size="15"
+      fill="${accent}" font-family="ui-sans-serif, system-ui" font-weight="800">${label}</text>
+
+    <text x="100" y="109" text-anchor="middle" font-size="13"
+      fill="${muted}" font-family="ui-sans-serif, system-ui">${value}</text>
+  `;
+
+  if (type === "battery") {
+    return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+      ${baseText}
+
+      <path d="M25 62 H74" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M126 62 H175" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+
+      <path d="M82 42 V82" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M118 32 V92" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+
+      <text x="77" y="38" text-anchor="middle" font-size="15"
+        fill="${muted}" font-family="ui-sans-serif, system-ui">−</text>
+      <text x="123" y="28" text-anchor="middle" font-size="15"
+        fill="${muted}" font-family="ui-sans-serif, system-ui">+</text>
+    </svg>`;
+  }
+
+  if (type === "resistor") {
+    return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+      ${baseText}
+
+      <path d="M25 62 H58" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M142 62 H175" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+
+      <rect x="58" y="45" width="84" height="34" rx="3"
+        fill="rgba(255,255,255,0.03)" stroke="${stroke}" stroke-width="4"/>
+    </svg>`;
+  }
+
+  if (type === "capacitor") {
+    return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+      ${baseText}
+
+      <path d="M25 62 H78" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M122 62 H175" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+
+      <path d="M86 36 V88" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M114 36 V88" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+
+      <text x="80" y="36" text-anchor="middle" font-size="14"
+        fill="${muted}" font-family="ui-sans-serif, system-ui">+</text>
+    </svg>`;
+  }
+
+  if (type === "bulb") {
+    return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+      ${baseText}
+
+      <path d="M25 62 H67" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M133 62 H175" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+
+      <circle cx="100" cy="62" r="33"
+        fill="rgba(255,255,255,0.02)" stroke="${stroke}" stroke-width="4"/>
+
+      <path d="M78 40 L122 84 M122 40 L78 84"
+        stroke="${stroke}" stroke-width="4" stroke-linecap="round"/>
+    </svg>`;
+  }
+
+  if (type === "switch") {
+    return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+      ${baseText}
+
+      <path d="M25 62 H76" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M124 62 H175" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+
+      <circle cx="78" cy="62" r="5" fill="${stroke}"/>
+      <circle cx="122" cy="62" r="5" fill="${stroke}"/>
+
+      ${
+        item.closed
+          ? `<path d="M78 62 H122" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>`
+          : `<path d="M78 62 L122 42" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>`
+      }
+    </svg>`;
+  }
+
+  if (type === "voltmeter" || type === "ammeter" || type === "ohmmeter") {
+    const symbol = type === "voltmeter" ? "V" : type === "ammeter" ? "A" : "Ω";
+
+    return `<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+      ${baseText}
+
+      <path d="M25 62 H62" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M138 62 H175" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+
+      <circle cx="100" cy="62" r="36"
+        fill="rgba(255,255,255,0.02)" stroke="${stroke}" stroke-width="4"/>
+
+      <text x="100" y="71" text-anchor="middle" font-size="28"
+        fill="${stroke}" font-family="ui-sans-serif, system-ui" font-weight="800">${symbol}</text>
+    </svg>`;
+  }
+
+  return "";
+}
