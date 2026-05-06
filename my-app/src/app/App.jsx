@@ -13,6 +13,8 @@ import HowItWorks from "../pages/HowItWorks";
 import Examples from "../pages/Examples";
 import About from "../pages/About";
 
+import { VoltLabProvider } from "../hooks/useVoltLabStore.jsx";
+
 const LANGUAGE_LABELS = {
   ro: "Română",
   en: "English",
@@ -50,13 +52,7 @@ function AppContent() {
         languageLabel={LANGUAGE_LABELS[targetLanguage] || ""}
       />
 
-      <div
-        className={
-          isTranslating
-            ? "pointer-events-none select-none"
-            : ""
-        }
-      >
+      <div className={isTranslating ? "pointer-events-none select-none" : ""}>
         {!hideNavbar && <Navbar />}
 
         <Routes>
@@ -89,7 +85,9 @@ function AppContent() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AppContent />
+      <VoltLabProvider>
+        <AppContent />
+      </VoltLabProvider>
     </BrowserRouter>
   );
 }
