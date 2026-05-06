@@ -12,8 +12,8 @@ const linkClass = ({ isActive }) =>
 export default function Navbar() {
   return (
     <nav className="fixed top-0 left-0 right-0 z-[100] w-full border-b border-white/10 bg-[#0b0f17]">
-      <div className="max-w-7xl mx-auto px-6 h-14 flex items-center gap-2 overflow-x-auto voltlab-scroll">
-        <div className="mr-6 shrink-0 font-bold text-white tracking-wide">⚡ VoltLab</div>
+      <div className="max-w-7xl mx-auto px-6 h-14 flex items-center gap-2">
+        <div className="mr-6 font-bold text-white tracking-wide">⚡ VoltLab</div>
 
         <NavLink to="/" className={linkClass}>
           Acasă

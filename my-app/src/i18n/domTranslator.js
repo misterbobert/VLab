@@ -1,5 +1,4 @@
 const CACHE_PREFIX = "voltlab:translation:";
-const ORIGINAL_TEXT_ATTR = "data-original-text";
 
 export const LANGUAGES = [
   { code: "ro", label: "Română", flag: "🇷🇴" },
@@ -24,6 +23,15 @@ export const LANGUAGES = [
 
 let currentTranslateRun = 0;
 
+function normalizeText(text) {
+  return String(text ?? "").replace(/\s+/g, " ").trim();
+}
+
+function googleLangCode(lang) {
+  if (lang === "zh-CN") return "zh-CN";
+  return lang;
+}
+
 function shouldSkipElement(element) {
   if (!element) return true;
 
@@ -32,25 +40,56 @@ function shouldSkipElement(element) {
   return (
     tag === "script" ||
     tag === "style" ||
-    tag === "svg" ||
-    tag === "path" ||
-    tag === "text" ||
     tag === "code" ||
     tag === "pre" ||
     tag === "input" ||
     tag === "textarea" ||
     tag === "select" ||
     tag === "option" ||
+    tag === "svg" ||
+    tag === "path" ||
+    tag === "circle" ||
+    tag === "rect" ||
+    tag === "line" ||
+    tag === "polyline" ||
+    tag === "polygon" ||
+    tag === "canvas" ||
+    element.closest("svg") ||
+    element.closest("canvas") ||
     element.closest("[data-no-translate]") ||
-    element.closest(".no-translate") ||
-    element.closest("svg")
+    element.closest(".no-translate")
   );
 }
 
-function normalizeText(text) {
-  return String(text ?? "")
-    .replace(/\s+/g, " ")
-    .trim();
+function looksLikeOnlySymbols(text) {
+  return /^[\d\s.,:;!?()[\]{}+\-*/%=<>|Ωµ°%·—–_#]+$/.test(text);
+}
+
+function getOriginalNodeText(node) {
+  if (!node.__voltlabOriginalText) {
+    node.__voltlabOriginalText = node.nodeValue;
+  }
+  return normalizeText(node.__voltlabOriginalText);
+}
+
+function setTranslatedNodeText(node, translatedText) {
+  const originalRaw = node.__voltlabOriginalText ?? node.nodeValue;
+  const prefix = String(originalRaw).match(/^\s*/)?.[0] ?? "";
+  const suffix = String(originalRaw).match(/\s*$/)?.[0] ?? "";
+  node.nodeValue = `${prefix}${translatedText}${suffix}`;
+}
+
+function restoreRomanian(root = document.body) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node;
+
+  while ((node = walker.nextNode())) {
+    if (node.__voltlabOriginalText != null) {
+      node.nodeValue = node.__voltlabOriginalText;
+    }
+  }
+
+  document.documentElement.lang = "ro";
 }
 
 function getTextNodes(root = document.body) {
@@ -60,23 +99,10 @@ function getTextNodes(root = document.body) {
 
       if (!text) return NodeFilter.FILTER_REJECT;
       if (text.length < 2) return NodeFilter.FILTER_REJECT;
-
-      if (/^[\d\s.,:;!?()[\]{}+\-*/%=<>|Ωµ]+$/.test(text)) {
-        return NodeFilter.FILTER_REJECT;
-      }
+      if (looksLikeOnlySymbols(text)) return NodeFilter.FILTER_REJECT;
 
       const parent = node.parentElement;
-
-      // Evităm nodurile text amestecate cu alte elemente, fiindcă restaurarea
-      // prin textContent poate distruge structura React. Traducem elementele
-      // simple: titluri, paragrafe simple, butoane, badge-uri etc.
-      if (parent?.childElementCount > 0) {
-        return NodeFilter.FILTER_REJECT;
-      }
-
-      if (shouldSkipElement(parent)) {
-        return NodeFilter.FILTER_REJECT;
-      }
+      if (shouldSkipElement(parent)) return NodeFilter.FILTER_REJECT;
 
       return NodeFilter.FILTER_ACCEPT;
     },
@@ -119,8 +145,51 @@ function setCachedTranslation(lang, text, translation) {
   try {
     localStorage.setItem(cacheKey(lang, text), translation);
   } catch {
-    // dacă localStorage e plin, ignorăm
+    // localStorage poate fi plin sau blocat; traducerea tot funcționează fără cache.
   }
+}
+
+async function translateWithGoogle(text, targetLang) {
+  const url = new URL("https://translate.googleapis.com/translate_a/single");
+  url.searchParams.set("client", "gtx");
+  url.searchParams.set("sl", "ro");
+  url.searchParams.set("tl", googleLangCode(targetLang));
+  url.searchParams.set("dt", "t");
+  url.searchParams.set("q", text);
+
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`Google translate failed: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const translated = data?.[0]?.map((part) => part?.[0] ?? "").join("");
+
+  if (!translated) {
+    throw new Error("Google translate returned empty text");
+  }
+
+  return translated;
+}
+
+async function translateWithMyMemory(text, targetLang) {
+  const url = new URL("https://api.mymemory.translated.net/get");
+  url.searchParams.set("q", text);
+  url.searchParams.set("langpair", `ro|${targetLang}`);
+
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`MyMemory translate failed: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const translated = data?.responseData?.translatedText;
+
+  if (!translated) {
+    throw new Error("MyMemory returned empty text");
+  }
+
+  return translated;
 }
 
 async function translateText(text, targetLang) {
@@ -129,142 +198,93 @@ async function translateText(text, targetLang) {
   const cached = getCachedTranslation(targetLang, text);
   if (cached) return cached;
 
-  const url = new URL("https://api.mymemory.translated.net/get");
-  url.searchParams.set("q", text);
-  url.searchParams.set("langpair", `ro|${targetLang}`);
+  let translated;
 
-  const response = await fetch(url.toString());
-
-  if (!response.ok) {
-    throw new Error("Translation request failed");
-  }
-
-  const data = await response.json();
-  const translated = data?.responseData?.translatedText;
-
-  if (!translated) {
-    return text;
+  try {
+    // Important: MyMemory dă rapid 429 pe pagini mari. De aceea folosim întâi endpointul Google public.
+    translated = await translateWithGoogle(text, targetLang);
+  } catch (googleError) {
+    translated = await translateWithMyMemory(text, targetLang);
   }
 
   setCachedTranslation(targetLang, text, translated);
-
   return translated;
-}
-
-function rememberOriginalText(node) {
-  const parent = node.parentElement;
-  if (!parent) return normalizeText(node.nodeValue);
-
-  if (parent.childElementCount > 0) {
-    return normalizeText(node.nodeValue);
-  }
-
-  if (!parent.hasAttribute(ORIGINAL_TEXT_ATTR)) {
-    parent.setAttribute(ORIGINAL_TEXT_ATTR, node.nodeValue);
-  }
-
-  return normalizeText(parent.getAttribute(ORIGINAL_TEXT_ATTR) || node.nodeValue);
-}
-
-function restoreRomanian(root = document.body) {
-  const elements = root.querySelectorAll(`[${ORIGINAL_TEXT_ATTR}]`);
-
-  elements.forEach((el) => {
-    const original = el.getAttribute(ORIGINAL_TEXT_ATTR);
-
-    if (original) {
-      el.textContent = original;
-    }
-
-    el.removeAttribute(ORIGINAL_TEXT_ATTR);
-  });
 }
 
 function applyTranslationToNodes(nodes, originalText, translatedText) {
   nodes.forEach((node) => {
-    const original = rememberOriginalText(node);
-
+    const original = getOriginalNodeText(node);
     if (original === originalText) {
-      node.nodeValue = node.nodeValue.replace(
-        normalizeText(node.nodeValue),
-        translatedText
-      );
+      setTranslatedNodeText(node, translatedText);
     }
   });
 }
 
 async function runWithConcurrency(items, limit, worker) {
-  const results = [];
   let index = 0;
 
   async function runOne() {
     while (index < items.length) {
       const currentIndex = index;
       index++;
-
-      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+      await worker(items[currentIndex], currentIndex);
     }
   }
 
-  const workers = Array.from(
-    { length: Math.min(limit, items.length) },
-    () => runOne()
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => runOne())
   );
-
-  await Promise.all(workers);
-
-  return results;
 }
 
-export async function translatePage(targetLang) {
+export async function translatePage(targetLang, options = {}) {
   const runId = ++currentTranslateRun;
+  const lang = targetLang || "ro";
 
-  document.documentElement.lang = targetLang;
-  localStorage.setItem("voltlab:lang", targetLang);
+  document.documentElement.lang = lang;
+  localStorage.setItem("voltlab:lang", lang);
 
-  if (targetLang === "ro") {
+  if (lang === "ro") {
     restoreRomanian();
     return;
   }
 
-  const nodes = getTextNodes(document.body);
+  // Revenim întâi la română, ca schimbarea EN -> FR să traducă mereu textul original, nu text deja tradus.
+  restoreRomanian();
 
-  const uniqueTexts = [
-    ...new Set(nodes.map((node) => rememberOriginalText(node))),
-  ].filter(Boolean);
+  const root = options.root || document.body;
+  const nodes = getTextNodes(root);
+  const uniqueTexts = [...new Set(nodes.map((node) => getOriginalNodeText(node)))].filter(Boolean);
 
-  const uncachedTexts = [];
+  const missingTexts = [];
 
-  // 1. Aplicăm instant tot ce e deja în cache
   for (const text of uniqueTexts) {
-    const cached = getCachedTranslation(targetLang, text);
-
+    const cached = getCachedTranslation(lang, text);
     if (cached) {
       applyTranslationToNodes(nodes, text, cached);
     } else {
-      uncachedTexts.push(text);
+      missingTexts.push(text);
     }
   }
 
-  // Dacă totul era deja în cache, termină imediat
-  if (uncachedTexts.length === 0) return;
+  if (missingTexts.length === 0) return;
 
-  // 2. Traducem doar ce lipsește, în paralel
-  await runWithConcurrency(uncachedTexts, 6, async (text) => {
+  await runWithConcurrency(missingTexts, 2, async (text) => {
     if (runId !== currentTranslateRun) return;
 
     try {
-      const translated = await translateText(text, targetLang);
-
+      const translated = await translateText(text, lang);
       if (runId !== currentTranslateRun) return;
-
       applyTranslationToNodes(nodes, text, translated);
-    } catch {
-      // dacă un text pică, îl lăsăm în română
+    } catch (error) {
+      console.warn(`VoltLab translation failed for text: ${text}`, error);
     }
   });
 }
 
 export function getSavedLanguage() {
   return localStorage.getItem("voltlab:lang") || "ro";
+}
+
+export function requestPageRetranslation() {
+  window.dispatchEvent(new CustomEvent("voltlab:content-changed"));
 }

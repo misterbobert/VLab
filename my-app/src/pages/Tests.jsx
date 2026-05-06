@@ -1,5 +1,11 @@
 import React, { useMemo, useState } from "react";
 
+function requestTranslationRefresh() {
+  window.setTimeout(() => {
+    window.dispatchEvent(new CustomEvent("voltlab:content-changed"));
+  }, 120);
+}
+
 function shuffle(array) {
   const copy = [...array];
   for (let i = copy.length - 1; i > 0; i--) {
@@ -23,12 +29,6 @@ function hasWire(wires, a, b) {
 
 function formatPct(value) {
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
-}
-
-function notifyContentUpdated(delay = 120) {
-  window.setTimeout(() => {
-    window.dispatchEvent(new CustomEvent("voltlab:content-updated"));
-  }, delay);
 }
 
 const THEORY_TASKS = [
@@ -1007,14 +1007,14 @@ export default function Tests() {
     setAnswers({});
     setChecked(false);
     setStarted(true);
+    requestTranslationRefresh();
     window.setTimeout(() => document.getElementById("test-zone")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
-    notifyContentUpdated(180);
   }
 
   function checkTest() {
     setChecked(true);
+    requestTranslationRefresh();
     window.setTimeout(() => document.getElementById("score-zone")?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
-    notifyContentUpdated(180);
   }
 
   const answeredCount = tasks.filter((task) => answers[task.id] !== undefined).length;

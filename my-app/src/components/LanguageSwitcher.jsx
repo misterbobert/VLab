@@ -17,44 +17,36 @@ export default function LanguageSwitcher({
   const location = useLocation();
   const [lang, setLang] = useState(getSavedLanguage());
   const [loading, setLoading] = useState(false);
-  const runRef = useRef(0);
+  const translatingRef = useRef(false);
 
   const current = LANGUAGES.find((l) => l.code === lang) || LANGUAGES[0];
 
-  async function runTranslation(nextLang, { showLoader = true } = {}) {
+  async function applyLanguage(nextLang, { silent = false, force = false } = {}) {
     if (!nextLang) return;
+    if (translatingRef.current) return;
 
-    const runId = runRef.current + 1;
-    runRef.current = runId;
+    // force permite reaplicarea aceleiași limbi după rerandări React.
+    if (!force && nextLang === lang && nextLang !== "ro") {
+      // Totuși reaplicăm traducerea, fiindcă pagina poate fi din nou în română după rerandare.
+      force = true;
+    }
+
+    translatingRef.current = true;
 
     try {
       setLoading(true);
       setLang(nextLang);
 
-      if (showLoader) {
-        onTranslateStart?.(nextLang);
-        await wait(120);
-      } else {
-        await wait(40);
-      }
+      if (!silent) onTranslateStart?.(nextLang);
 
-      if (runRef.current !== runId) return;
+      await wait(120);
       await translatePage(nextLang);
-
-      if (showLoader) {
-        await wait(250);
-      }
+      await wait(200);
     } finally {
-      if (runRef.current === runId) {
-        setLoading(false);
-        if (showLoader) onTranslateEnd?.();
-      }
+      translatingRef.current = false;
+      setLoading(false);
+      if (!silent) onTranslateEnd?.();
     }
-  }
-
-  async function changeLanguage(nextLang) {
-    if (!nextLang || loading) return;
-    await runTranslation(nextLang, { showLoader: true });
   }
 
   useEffect(() => {
@@ -62,34 +54,27 @@ export default function LanguageSwitcher({
 
     const id = window.setTimeout(() => {
       if (saved !== "ro") {
-        runTranslation(saved, { showLoader: true });
+        applyLanguage(saved, { force: true });
       } else {
         setLang("ro");
       }
     }, 250);
 
     return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
   useEffect(() => {
-    let timer = null;
-
-    function retranslateDynamicContent() {
+    function handleContentChanged() {
       const saved = getSavedLanguage();
-      if (saved === "ro") return;
-
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        runTranslation(saved, { showLoader: false });
-      }, 180);
+      if (saved !== "ro") {
+        window.setTimeout(() => applyLanguage(saved, { force: true, silent: true }), 80);
+      }
     }
 
-    window.addEventListener("voltlab:content-updated", retranslateDynamicContent);
-
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("voltlab:content-updated", retranslateDynamicContent);
-    };
+    window.addEventListener("voltlab:content-changed", handleContentChanged);
+    return () => window.removeEventListener("voltlab:content-changed", handleContentChanged);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -112,7 +97,7 @@ export default function LanguageSwitcher({
           {LANGUAGES.map((language) => (
             <button
               key={language.code}
-              onClick={() => changeLanguage(language.code)}
+              onClick={() => applyLanguage(language.code, { force: true })}
               disabled={loading}
               className={[
                 "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm transition disabled:cursor-wait disabled:opacity-50",
