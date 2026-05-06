@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import Toolbar from "../lab/Toolbar";
 
 export default function Topbar() {
@@ -17,7 +18,16 @@ export default function Topbar() {
         </div>
 
         <div className="flex justify-center">
-          <Toolbar />
+          <div className="flex items-center gap-2">
+            <Toolbar />
+
+            <Link
+              to="/logic"
+              className="rounded-xl border border-violet-300/25 bg-violet-300/10 px-3 py-2 text-sm font-semibold text-violet-100 transition hover:bg-violet-300/15"
+            >
+              Porți logice
+            </Link>
+          </div>
         </div>
 
         <div />

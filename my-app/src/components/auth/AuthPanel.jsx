@@ -9,7 +9,10 @@ import {
   getMyProfile,
 } from "../../services/authService";
 
-export default function AuthPanel({ onAuthReady }) {
+export default function AuthPanel({
+  onAuthReady,
+  className = "fixed right-4 top-20 z-[60]",
+}) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState("login");
 
@@ -119,7 +122,7 @@ export default function AuthPanel({ onAuthReady }) {
     "cont activ";
 
   return (
-    <div className="fixed right-4 top-20 z-[60]">
+    <div className={className}>
       <button
         onClick={() => setOpen((v) => !v)}
         className="rounded-2xl border border-cyan-300/30 bg-cyan-300 px-4 py-2 text-sm font-black text-slate-950 shadow-lg transition hover:bg-cyan-200"
@@ -128,8 +131,7 @@ export default function AuthPanel({ onAuthReady }) {
       </button>
 
       {open && (
-        <div className="mt-3 w-[380px] max-w-[calc(100vw-32px)] rounded-[26px] border border-white/10 bg-[#0b0f17]/95 p-4 text-white shadow-2xl backdrop-blur">
-          <div className="flex items-start justify-between gap-3">
+      <div className="absolute right-0 top-full mt-3 w-[380px] max-w-[calc(100vw-32px)] rounded-[26px] border border-white/10 bg-[#0b0f17]/95 p-4 text-white shadow-2xl backdrop-blur">    <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-black">
                 {user ? "Cont VoltLab" : "Autentificare"}

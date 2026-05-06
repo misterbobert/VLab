@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { useVoltLab } from "../../hooks/useVoltLabStore.jsx";
 import { watchAuth } from "../../services/authService";
 
 import {
@@ -11,9 +10,11 @@ import {
   loadCircuitByTransferCode,
 } from "../../services/circuitCloud";
 
-export default function SavePanel() {
-  const { actions } = useVoltLab();
-
+export default function LogicSavePanel({
+  getSnapshot,
+  loadSnapshot,
+  className = "fixed right-24 top-20 z-[55]",
+}) {
   const [open, setOpen] = useState(false);
   const [user, setUser] = useState(null);
 
@@ -30,7 +31,7 @@ export default function SavePanel() {
     if (!user) return;
 
     try {
-      const data = await listMyCircuits("electric-lab");
+      const data = await listMyCircuits("logic-lab");
       setCircuits(data);
     } catch (err) {
       setMessage(err.message || "Nu s-au putut încărca circuitele.");
@@ -62,18 +63,22 @@ export default function SavePanel() {
       setMessage("");
       setGeneratedCode("");
 
-      const snapshot = actions.getSnapshot();
+      const snapshot = {
+        kind: "logic-lab",
+        version: 1,
+        ...getSnapshot(),
+      };
 
       await saveCircuitToCloud({
-        title: title || "Circuit VoltLab",
+        title: title || "Circuit logic VoltLab",
         snapshot,
       });
 
       setTitle("");
-      setMessage("Circuit salvat cu succes.");
+      setMessage("Circuit logic salvat cu succes.");
       await refreshCircuits();
     } catch (err) {
-      setMessage(err.message || "Circuitul nu a putut fi salvat.");
+      setMessage(err.message || "Circuitul logic nu a putut fi salvat.");
     } finally {
       setLoading(false);
     }
@@ -86,11 +91,19 @@ export default function SavePanel() {
       setGeneratedCode("");
 
       const snapshot = await loadCircuitFromCloud(circuitId);
-      actions.loadSnapshot(snapshot);
 
-      setMessage("Circuit încărcat în canvas.");
+      if (snapshot?.kind !== "logic-lab") {
+        setMessage(
+          "Această salvare nu este un circuit logic. Este probabil un circuit electric."
+        );
+        return;
+      }
+
+      loadSnapshot(snapshot);
+
+      setMessage("Circuit logic încărcat în canvas.");
     } catch (err) {
-      setMessage(err.message || "Circuitul nu a putut fi încărcat.");
+      setMessage(err.message || "Circuitul logic nu a putut fi încărcat.");
     } finally {
       setLoading(false);
     }
@@ -136,10 +149,18 @@ export default function SavePanel() {
       setGeneratedCode("");
 
       const snapshot = await loadCircuitByTransferCode(inputCode);
-      actions.loadSnapshot(snapshot);
+
+      if (snapshot?.kind !== "logic-lab") {
+        setMessage(
+          "Codul este valid, dar nu conține un circuit logic VoltLab."
+        );
+        return;
+      }
+
+      loadSnapshot(snapshot);
 
       setInputCode("");
-      setMessage("Circuit încărcat folosind codul.");
+      setMessage("Circuit logic încărcat folosind codul.");
     } catch (err) {
       setMessage(err.message || "Codul nu a putut fi folosit.");
     } finally {
@@ -148,7 +169,7 @@ export default function SavePanel() {
   }
 
   return (
-    <div className="fixed right-24 top-20 z-[55]">
+   <div className={className}>
       <button
         onClick={() => setOpen((v) => !v)}
         className="rounded-2xl border border-cyan-300/30 bg-white/10 px-4 py-2 text-sm font-black text-white shadow-lg transition hover:bg-white/15"
@@ -157,13 +178,12 @@ export default function SavePanel() {
       </button>
 
       {open && (
-        <div className="mt-3 w-[400px] max-w-[calc(100vw-32px)] rounded-[26px] border border-white/10 bg-[#0b0f17]/95 p-4 text-white shadow-2xl backdrop-blur">
-          <div className="flex items-start justify-between gap-3">
+       <div className="absolute right-0 top-full mt-3 w-[400px] max-w-[calc(100vw-32px)] rounded-[26px] border border-white/10 bg-[#0b0f17]/95 p-4 text-white shadow-2xl backdrop-blur">   <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-lg font-black">Salvări circuite</h2>
+              <h2 className="text-lg font-black">Salvări circuite logice</h2>
               <p className="mt-1 text-xs leading-5 text-white/55">
-                Salvează canvasul exact cum este acum și îl poți încărca mai
-                târziu de pe orice dispozitiv.
+                Salvează canvasul logic exact cum este acum și îl poți încărca
+                mai târziu de pe orice dispozitiv.
               </p>
             </div>
 
@@ -181,7 +201,7 @@ export default function SavePanel() {
             </div>
 
             <p className="mt-1 text-xs leading-5 text-cyan-50/65">
-              Poți încărca un circuit prin cod chiar și fără cont.
+              Poți încărca un circuit logic prin cod chiar și fără cont.
             </p>
 
             <div className="mt-3 flex gap-2">
@@ -204,8 +224,8 @@ export default function SavePanel() {
 
           {!user ? (
             <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-3 text-sm leading-6 text-amber-100/85">
-              Pentru salvarea circuitelor în cont trebuie să te conectezi.
-              Încărcarea prin cod funcționează și fără login.
+              Pentru salvarea circuitelor logice în cont trebuie să te
+              conectezi. Încărcarea prin cod funcționează și fără login.
             </div>
           ) : (
             <>
@@ -214,7 +234,7 @@ export default function SavePanel() {
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   maxLength={60}
-                  placeholder="Nume circuit"
+                  placeholder="Nume circuit logic"
                   className="w-full rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-cyan-300/40"
                 />
 
@@ -223,7 +243,7 @@ export default function SavePanel() {
                   disabled={loading}
                   className="w-full rounded-2xl bg-cyan-300 px-4 py-2 text-sm font-black text-slate-950 transition hover:bg-cyan-200 disabled:opacity-50"
                 >
-                  Salvează canvasul actual
+                  Salvează canvasul logic actual
                 </button>
               </div>
 
