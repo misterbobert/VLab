@@ -32,6 +32,9 @@ function shouldSkipElement(element) {
   return (
     tag === "script" ||
     tag === "style" ||
+    tag === "svg" ||
+    tag === "path" ||
+    tag === "text" ||
     tag === "code" ||
     tag === "pre" ||
     tag === "input" ||
@@ -39,7 +42,8 @@ function shouldSkipElement(element) {
     tag === "select" ||
     tag === "option" ||
     element.closest("[data-no-translate]") ||
-    element.closest(".no-translate")
+    element.closest(".no-translate") ||
+    element.closest("svg")
   );
 }
 
@@ -62,6 +66,13 @@ function getTextNodes(root = document.body) {
       }
 
       const parent = node.parentElement;
+
+      // Evităm nodurile text amestecate cu alte elemente, fiindcă restaurarea
+      // prin textContent poate distruge structura React. Traducem elementele
+      // simple: titluri, paragrafe simple, butoane, badge-uri etc.
+      if (parent?.childElementCount > 0) {
+        return NodeFilter.FILTER_REJECT;
+      }
 
       if (shouldSkipElement(parent)) {
         return NodeFilter.FILTER_REJECT;
@@ -143,6 +154,10 @@ async function translateText(text, targetLang) {
 function rememberOriginalText(node) {
   const parent = node.parentElement;
   if (!parent) return normalizeText(node.nodeValue);
+
+  if (parent.childElementCount > 0) {
+    return normalizeText(node.nodeValue);
+  }
 
   if (!parent.hasAttribute(ORIGINAL_TEXT_ATTR)) {
     parent.setAttribute(ORIGINAL_TEXT_ATTR, node.nodeValue);

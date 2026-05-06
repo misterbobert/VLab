@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
   LANGUAGES,
@@ -17,59 +17,84 @@ export default function LanguageSwitcher({
   const location = useLocation();
   const [lang, setLang] = useState(getSavedLanguage());
   const [loading, setLoading] = useState(false);
+  const runRef = useRef(0);
 
   const current = LANGUAGES.find((l) => l.code === lang) || LANGUAGES[0];
 
-  async function changeLanguage(nextLang) {
-    if (!nextLang || nextLang === lang || loading) return;
+  async function runTranslation(nextLang, { showLoader = true } = {}) {
+    if (!nextLang) return;
+
+    const runId = runRef.current + 1;
+    runRef.current = runId;
 
     try {
       setLoading(true);
       setLang(nextLang);
 
-      onTranslateStart?.(nextLang);
+      if (showLoader) {
+        onTranslateStart?.(nextLang);
+        await wait(120);
+      } else {
+        await wait(40);
+      }
 
-      // lăsăm overlay-ul să apară pe ecran înainte de traducere
-      await wait(120);
-
+      if (runRef.current !== runId) return;
       await translatePage(nextLang);
 
-      // mic delay ca să nu dispară brusc
-      await wait(250);
+      if (showLoader) {
+        await wait(250);
+      }
     } finally {
-      setLoading(false);
-      onTranslateEnd?.();
+      if (runRef.current === runId) {
+        setLoading(false);
+        if (showLoader) onTranslateEnd?.();
+      }
     }
+  }
+
+  async function changeLanguage(nextLang) {
+    if (!nextLang || loading) return;
+    await runTranslation(nextLang, { showLoader: true });
   }
 
   useEffect(() => {
     const saved = getSavedLanguage();
 
-    const id = window.setTimeout(async () => {
+    const id = window.setTimeout(() => {
       if (saved !== "ro") {
-        try {
-          setLoading(true);
-          setLang(saved);
-
-          onTranslateStart?.(saved);
-          await wait(120);
-
-          await translatePage(saved);
-
-          await wait(250);
-        } finally {
-          setLoading(false);
-          onTranslateEnd?.();
-        }
+        runTranslation(saved, { showLoader: true });
+      } else {
+        setLang("ro");
       }
     }, 250);
 
     return () => window.clearTimeout(id);
   }, [location.pathname]);
 
+  useEffect(() => {
+    let timer = null;
+
+    function retranslateDynamicContent() {
+      const saved = getSavedLanguage();
+      if (saved === "ro") return;
+
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        runTranslation(saved, { showLoader: false });
+      }, 180);
+    }
+
+    window.addEventListener("voltlab:content-updated", retranslateDynamicContent);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("voltlab:content-updated", retranslateDynamicContent);
+    };
+  }, []);
+
   return (
     <div className="fixed bottom-4 right-4 z-[10000]" data-no-translate>
-     <div className="group relative rounded-2xl p-1">
+      <div className="group relative rounded-2xl p-1">
         <button
           disabled={loading}
           className={[
@@ -82,7 +107,9 @@ export default function LanguageSwitcher({
           <span>{current.code.toUpperCase()}</span>
           <span className="text-white/35">{loading ? "..." : "▾"}</span>
         </button>
-<div className="pointer-events-none absolute bottom-full right-0 mb-0 max-h-80 w-56 translate-y-0 overflow-y-auto rounded-2xl border border-white/10 bg-[#0b0f17]/95 p-2 opacity-0 shadow-2xl backdrop-blur transition group-hover:pointer-events-auto group-hover:opacity-100">      {LANGUAGES.map((language) => (
+
+        <div className="pointer-events-none absolute bottom-full right-0 mb-0 max-h-80 w-56 translate-y-0 overflow-y-auto rounded-2xl border border-white/10 bg-[#0b0f17]/95 p-2 opacity-0 shadow-2xl backdrop-blur transition group-hover:pointer-events-auto group-hover:opacity-100">
+          {LANGUAGES.map((language) => (
             <button
               key={language.code}
               onClick={() => changeLanguage(language.code)}
