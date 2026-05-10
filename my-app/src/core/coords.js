@@ -144,6 +144,737 @@ function drawComponentPin(ctx, x, y, active = false) {
   ctx.restore();
 }
 
+
+
+function parseSIValue(value, expectedUnit = "") {
+  if (typeof value === "number") return value;
+  if (value == null) return NaN;
+
+  const raw = String(value).trim();
+  if (!raw || raw === "—" || raw === "∞") return NaN;
+
+  if (expectedUnit && !raw.toLowerCase().includes(expectedUnit.toLowerCase())) {
+    return NaN;
+  }
+
+  const clean = raw
+    .replace(",", ".")
+    .replace(/\s+/g, "")
+    .replace(/[ΩVAWAhFJC%]/gi, "");
+
+  const m = clean.match(/^(-?\d+(?:\.\d+)?)(p|n|u|µ|m|k|M|G|T)?$/);
+  if (!m) {
+    const n = Number(clean);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
+  const num = Number(m[1]);
+  if (!Number.isFinite(num)) return NaN;
+
+  const prefix = m[2] || "";
+  const mult =
+    prefix === "p"
+      ? 1e-12
+      : prefix === "n"
+      ? 1e-9
+      : prefix === "u" || prefix === "µ"
+      ? 1e-6
+      : prefix === "m"
+      ? 1e-3
+      : prefix === "k"
+      ? 1e3
+      : prefix === "M"
+      ? 1e6
+      : prefix === "G"
+      ? 1e9
+      : prefix === "T"
+      ? 1e12
+      : 1;
+
+  return num * mult;
+}
+
+function parseAmpValue(value) {
+  const parsed = parseSIValue(value, "A");
+  return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
+}
+
+function safeNumber(value, fallback) {
+  const parsed = parseSIValue(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function safeResistance(value, fallback) {
+  return Math.max(1e-6, safeNumber(value, fallback));
+}
+
+function itemCurrentAbs(item) {
+  if (!item) return 0;
+
+  const candidates = [
+    item.displayCurrent,
+    item.displayIc,
+    item.displayIb,
+    item.display,
+    item.current,
+    item.I,
+  ];
+
+  let best = 0;
+
+  for (const value of candidates) {
+    const parsed = parseAmpValue(value);
+    if (parsed > best) best = parsed;
+  }
+
+  return best;
+}
+
+function itemPins(nodes, itemId) {
+  return nodes.filter((n) => n.itemId === itemId);
+}
+
+function pinByName(pins, name, fallbackIndex = 0) {
+  return pins.find((p) => p.name === name) || pins[fallbackIndex] || null;
+}
+
+function nodeToNetGet(sol, nodeId) {
+  const map = sol?.nodeToNet;
+  if (!map) return null;
+  if (typeof map.get === "function") return map.get(nodeId);
+  return map[nodeId] ?? null;
+}
+
+function voltageForNode(nodeId, sol) {
+  const net = nodeToNetGet(sol, nodeId);
+  if (net == null) return 0;
+  return sol?.mna?.V?.[net] ?? 0;
+}
+
+function voltageDiff(aNode, bNode, sol) {
+  return voltageForNode(aNode.id, sol) - voltageForNode(bNode.id, sol);
+}
+
+function demand(sourcePin, sinkPin, current) {
+  if (!sourcePin || !sinkPin) return null;
+  const amount = Math.abs(Number(current));
+  if (!Number.isFinite(amount) || amount < 0.000001) return null;
+  if (sourcePin.id === sinkPin.id) return null;
+  return { source: sourcePin.id, sink: sinkPin.id, current: amount };
+}
+
+function passiveDemand(aPin, bPin, sol, resistance, fallbackCurrent = 0) {
+  if (!aPin || !bPin || !sol?.ok) return null;
+
+  const dv = voltageDiff(aPin, bPin, sol);
+  let current = Math.abs(dv) / Math.max(1e-9, resistance);
+  if (!Number.isFinite(current) || current < 0.000001) {
+    current = Math.abs(fallbackCurrent || 0);
+  }
+
+  if (current < 0.000001) return null;
+
+  // Curent convențional prin componentă: intră pe pinul cu tensiune mai mare
+  // și iese pe pinul cu tensiune mai mică. Pe FIRE, sursa este pinul de ieșire
+  // al componentei, iar destinația este pinul unde curentul intră în componentă.
+  if (dv >= 0) return demand(bPin, aPin, current);
+  return demand(aPin, bPin, current);
+}
+
+function batteryCurrentFromSol(item, sol) {
+  const meta = sol?.batterySourceByItemId?.get?.(item.id);
+  if (meta && sol?.mna?.Ivs) {
+    const n = Math.abs(sol.mna.Ivs[meta.sourceIndex] ?? 0);
+    if (Number.isFinite(n) && n > 0.000001) return n;
+  }
+
+  return itemCurrentAbs(item);
+}
+
+function componentDemands(item, nodes, sol) {
+  if (!item?.id || !sol?.ok) return [];
+
+  const pins = itemPins(nodes, item.id);
+  const type = String(item.type ?? "").toLowerCase();
+
+  if (type === "transistor" || type === "transistornpn" || type === "transistorpnp" || type === "npn" || type === "pnp") {
+    const bPin = pinByName(pins, "B", 0) || pinByName(pins, "base", 0);
+    const cPin = pinByName(pins, "C", 1) || pinByName(pins, "collector", 1);
+    const ePin = pinByName(pins, "E", 2) || pinByName(pins, "emitter", 2);
+    if (!bPin || !cPin || !ePin) return [];
+
+    const variant = String(item.variant ?? item.kind ?? item.transistorType ?? item.type).toUpperCase();
+    const ronCE = safeResistance(item.RonCE ?? item.ronCE ?? 100, 100);
+    const vc = voltageForNode(cPin.id, sol);
+    const ve = voltageForNode(ePin.id, sol);
+    const fallback = itemCurrentAbs(item);
+
+    if (variant.includes("PNP")) {
+      const current = Math.max(Math.abs((ve - vc) / ronCE), fallback);
+      const d = demand(cPin, ePin, current); // componentă E -> C, deci pe fire C -> E
+      return d ? [d] : [];
+    }
+
+    const current = Math.max(Math.abs((vc - ve) / ronCE), fallback);
+    const d = demand(ePin, cPin, current); // componentă C -> E, deci pe fire E -> C
+    return d ? [d] : [];
+  }
+
+  const a = pinByName(pins, "a", 0);
+  const b = pinByName(pins, "b", 1);
+  if (!a || !b) return [];
+
+  if (type === "battery") {
+    const meta = sol?.batterySourceByItemId?.get?.(item.id);
+    const signedSourceCurrent = meta ? Number(sol?.mna?.Ivs?.[meta.sourceIndex] ?? 0) : NaN;
+
+    if (Number.isFinite(signedSourceCurrent) && Math.abs(signedSourceCurrent) > 0.000001) {
+      // În solveMNA, curentul sursei de tensiune este definit din pinul a
+      // spre nodul intern. Când bateria livrează energie în exterior, acest
+      // curent este de obicei negativ, deci particulele ies din pinul a și
+      // se întorc prin pinul b. Dacă bateria este încărcată / opusă, sensul
+      // se inversează. Asta repară cazurile cu 2 baterii în serie/opuse.
+      const d = signedSourceCurrent < 0
+        ? demand(a, b, Math.abs(signedSourceCurrent))
+        : demand(b, a, Math.abs(signedSourceCurrent));
+      return d ? [d] : [];
+    }
+
+    const current = batteryCurrentFromSol(item, sol);
+    const va = voltageForNode(a.id, sol);
+    const vb = voltageForNode(b.id, sol);
+    const d = va >= vb ? demand(a, b, current) : demand(b, a, current);
+    return d ? [d] : [];
+  }
+
+  if (type === "resistor") {
+    const d = passiveDemand(a, b, sol, safeResistance(item.R ?? 100, 100));
+    return d ? [d] : [];
+  }
+
+  if (type === "potentiometer") {
+    const r =
+      item.R ??
+      item.resistance ??
+      item.currentR ??
+      item.displayResistance ??
+      Math.max(
+        1,
+        safeResistance(item.Rmin ?? 0, 0) +
+          (safeResistance(item.Rmax ?? 10000, 10000) - safeResistance(item.Rmin ?? 0, 0)) *
+            (safeNumber(item.positionPct ?? item.position ?? 50, 50) / 100)
+      );
+
+    const d = passiveDemand(a, b, sol, safeResistance(r, 10000));
+    return d ? [d] : [];
+  }
+
+  if (type === "bulb") {
+    const d = passiveDemand(a, b, sol, safeResistance(item.R ?? 30, 30));
+    return d ? [d] : [];
+  }
+
+  if (type === "switch") {
+    if (!item.closed) return [];
+    const d = passiveDemand(a, b, sol, 1e-4);
+    return d ? [d] : [];
+  }
+
+  if (type === "ammeter") {
+    const d = passiveDemand(a, b, sol, 1e-4);
+    return d ? [d] : [];
+  }
+
+  if (type === "voltmeter" || type === "ohmmeter") {
+    return [];
+  }
+
+  if (type === "capacitor") {
+    const meta = sol?.capacitorSourceByItemId?.get?.(item.id);
+    const signedSourceCurrent = meta ? Number(sol?.mna?.Ivs?.[meta.sourceIndex] ?? 0) : NaN;
+
+    if (Number.isFinite(signedSourceCurrent) && Math.abs(signedSourceCurrent) > 0.000001) {
+      // Condensatorul încărcat este modelat ca sursă temporară. Folosim
+      // semnul curentului MNA exact ca la baterie, altfel la 2 condensatori
+      // particulele pot părea că ies simultan din ambele capete.
+      const d = signedSourceCurrent < 0
+        ? demand(a, b, Math.abs(signedSourceCurrent))
+        : demand(b, a, Math.abs(signedSourceCurrent));
+      return d ? [d] : [];
+    }
+
+    const current = itemCurrentAbs(item);
+    if (current <= 0.000001) return [];
+    const d = passiveDemand(a, b, sol, safeResistance(item.ESR ?? 0.5, 0.5), current);
+    return d ? [d] : [];
+  }
+
+  if (type === "diode") {
+    const vf = safeNumber(item.Vf ?? item.forwardVoltage, 0.7);
+    const ron = safeResistance(item.Ron ?? item.ron, 8);
+    const dv = voltageDiff(a, b, sol);
+    const current = dv > vf ? (dv - vf) / ron : itemCurrentAbs(item);
+    const d = current > 0.000001 ? demand(b, a, current) : null; // A -> K prin diodă, deci pe fire K -> A
+    return d ? [d] : [];
+  }
+
+  const fallback = itemCurrentAbs(item);
+  if (fallback <= 0.000001) return [];
+
+  const d = passiveDemand(a, b, sol, 1, fallback);
+  return d ? [d] : [];
+}
+
+function makeEdgeKey(a, b) {
+  return [a, b].sort().join("__");
+}
+
+function buildWireGraph(nodes, wires) {
+  const adj = new Map(nodes.map((n) => [n.id, []]));
+
+  for (let i = 0; i < wires.length; i++) {
+    const w = wires[i];
+    if (!adj.has(w.aNodeId) || !adj.has(w.bNodeId)) continue;
+
+    adj.get(w.aNodeId).push(w.bNodeId);
+    adj.get(w.bNodeId).push(w.aNodeId);
+  }
+
+  return adj;
+}
+
+function shortestWirePath(adj, start, goal) {
+  if (start === goal) return [start];
+
+  const queue = [start];
+  const prev = new Map([[start, null]]);
+
+  for (let qi = 0; qi < queue.length; qi++) {
+    const cur = queue[qi];
+
+    for (const nx of adj.get(cur) || []) {
+      if (prev.has(nx)) continue;
+
+      prev.set(nx, cur);
+      if (nx === goal) {
+        const path = [goal];
+        let p = cur;
+        while (p != null) {
+          path.push(p);
+          p = prev.get(p);
+        }
+        return path.reverse();
+      }
+      queue.push(nx);
+    }
+  }
+
+  return null;
+}
+
+function connectedComponentsOfWireGraph(adj) {
+  const seen = new Set();
+  const groups = [];
+
+  for (const id of adj.keys()) {
+    if (seen.has(id)) continue;
+
+    const q = [id];
+    const group = new Set([id]);
+    seen.add(id);
+
+    for (let i = 0; i < q.length; i++) {
+      const cur = q[i];
+      for (const nx of adj.get(cur) || []) {
+        if (seen.has(nx)) continue;
+        seen.add(nx);
+        group.add(nx);
+        q.push(nx);
+      }
+    }
+
+    groups.push(group);
+  }
+
+  return groups;
+}
+
+function addDirectedWireFlow(flowMap, wireMap, wires, from, to, amount) {
+  const edgeKey = makeEdgeKey(from, to);
+  const wireIndex = wireMap.get(edgeKey);
+  if (wireIndex == null) return;
+
+  const w = wires[wireIndex];
+  const previous = flowMap.get(edgeKey) || 0;
+  const sign = w.aNodeId === from && w.bNodeId === to ? 1 : -1;
+
+  flowMap.set(edgeKey, previous + sign * amount);
+}
+
+function buildWireFlowMap(nodes, wires, items, sol) {
+  const adj = buildWireGraph(nodes, wires);
+  const wireMap = new Map();
+
+  for (let i = 0; i < wires.length; i++) {
+    wireMap.set(makeEdgeKey(wires[i].aNodeId, wires[i].bNodeId), i);
+  }
+
+  const allDemands = [];
+  for (const item of items || []) {
+    allDemands.push(...componentDemands(item, nodes, sol));
+  }
+
+  const flowMap = new Map();
+  if (!allDemands.length) return flowMap;
+
+  const groups = connectedComponentsOfWireGraph(adj);
+
+  for (const group of groups) {
+    const sources = [];
+    const sinks = [];
+
+    for (const d of allDemands) {
+      if (group.has(d.source)) sources.push({ id: d.source, amount: d.current });
+      if (group.has(d.sink)) sinks.push({ id: d.sink, amount: d.current });
+    }
+
+    if (!sources.length || !sinks.length) continue;
+
+    for (const source of sources) {
+      let remainingSource = source.amount;
+
+      while (remainingSource > 0.000001) {
+        let bestSink = null;
+        let bestPath = null;
+
+        for (const sink of sinks) {
+          if (sink.amount <= 0.000001) continue;
+          const path = shortestWirePath(adj, source.id, sink.id);
+          if (!path || path.length < 2) continue;
+          if (!bestPath || path.length < bestPath.length) {
+            bestPath = path;
+            bestSink = sink;
+          }
+        }
+
+        if (!bestPath || !bestSink) break;
+
+        const amount = Math.min(remainingSource, bestSink.amount);
+        for (let i = 0; i < bestPath.length - 1; i++) {
+          addDirectedWireFlow(flowMap, wireMap, wires, bestPath[i], bestPath[i + 1], amount);
+        }
+
+        remainingSource -= amount;
+        bestSink.amount -= amount;
+      }
+    }
+  }
+
+  return flowMap;
+}
+
+
+function normalizedPairKey(a, b) {
+  return [String(a), String(b)].sort().join("__");
+}
+
+function buildNetMapFromWires(nodes, wires) {
+  const parent = new Map(nodes.map((n) => [n.id, n.id]));
+
+  function find(x) {
+    if (!parent.has(x)) parent.set(x, x);
+    let p = parent.get(x);
+    if (p !== x) {
+      p = find(p);
+      parent.set(x, p);
+    }
+    return p;
+  }
+
+  function unite(a, b) {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(rb, ra);
+  }
+
+  for (const w of wires || []) {
+    if (w?.aNodeId && w?.bNodeId) unite(w.aNodeId, w.bNodeId);
+  }
+
+  const map = new Map();
+  for (const n of nodes || []) map.set(n.id, find(n.id));
+  return map;
+}
+
+function getNodeNetId(nodeId, fallbackNetMap, sol) {
+  const fromSol = nodeToNetGet(sol, nodeId);
+  if (fromSol != null) return `sol:${fromSol}`;
+  return `wire:${fallbackNetMap.get(nodeId) ?? nodeId}`;
+}
+
+function markWiresTouchingNode(result, wires, nodeId) {
+  for (let i = 0; i < (wires || []).length; i++) {
+    const w = wires[i];
+    if (w.aNodeId === nodeId || w.bNodeId === nodeId) result.add(i);
+  }
+}
+
+function markWiresTouchingItem(result, wires, nodes, itemId) {
+  for (const pin of itemPins(nodes, itemId)) {
+    markWiresTouchingNode(result, wires, pin.id);
+  }
+}
+
+function buildIndexedWireGraph(nodes, wires) {
+  const adj = new Map(nodes.map((n) => [n.id, []]));
+
+  for (let i = 0; i < (wires || []).length; i++) {
+    const w = wires[i];
+    if (!adj.has(w.aNodeId) || !adj.has(w.bNodeId)) continue;
+
+    adj.get(w.aNodeId).push({ nodeId: w.bNodeId, wireIndex: i });
+    adj.get(w.bNodeId).push({ nodeId: w.aNodeId, wireIndex: i });
+  }
+
+  return adj;
+}
+
+function shortestWireIndexPath(adj, start, goal) {
+  if (!start || !goal || start === goal) return [];
+
+  const q = [start];
+  const prev = new Map([[start, null]]);
+
+  for (let qi = 0; qi < q.length; qi++) {
+    const cur = q[qi];
+
+    for (const edge of adj.get(cur) || []) {
+      if (prev.has(edge.nodeId)) continue;
+      prev.set(edge.nodeId, { nodeId: cur, wireIndex: edge.wireIndex });
+
+      if (edge.nodeId === goal) {
+        const path = [];
+        let x = goal;
+        while (prev.get(x)) {
+          const step = prev.get(x);
+          path.push(step.wireIndex);
+          x = step.nodeId;
+        }
+        return path.reverse();
+      }
+
+      q.push(edge.nodeId);
+    }
+  }
+
+  return null;
+}
+
+function getTwoPinNetsForItem(item, nodes, fallbackNetMap, sol) {
+  const pins = itemPins(nodes, item.id);
+  const a = pinByName(pins, "a", 0);
+  const b = pinByName(pins, "b", 1);
+  if (!a || !b) return null;
+
+  return {
+    a,
+    b,
+    na: getNodeNetId(a.id, fallbackNetMap, sol),
+    nb: getNodeNetId(b.id, fallbackNetMap, sol),
+  };
+}
+
+function unorderedNetPair(nets) {
+  if (!nets) return null;
+  return normalizedPairKey(nets.na, nets.nb);
+}
+
+function isComponentLoadForDanger(item) {
+  const type = String(item?.type ?? "").toLowerCase();
+  return (
+    type === "resistor" ||
+    type === "potentiometer" ||
+    type === "bulb" ||
+    type === "capacitor" ||
+    type === "diode" ||
+    type === "battery" ||
+    type === "switch"
+  );
+}
+
+function buildDangerWireSet(nodes, wires, items, sol) {
+  const result = new Set();
+  const fallbackNetMap = buildNetMapFromWires(nodes, wires);
+  const indexedGraph = buildIndexedWireGraph(nodes, wires);
+  const pairItems = new Map();
+  const netUsage = new Map();
+
+  function addToNetUsage(net, item) {
+    if (!netUsage.has(net)) netUsage.set(net, []);
+    netUsage.get(net).push(item);
+  }
+
+  for (const item of items || []) {
+    const nets = getTwoPinNetsForItem(item, nodes, fallbackNetMap, sol);
+    if (!nets) continue;
+
+    const key = unorderedNetPair(nets);
+    if (!pairItems.has(key)) pairItems.set(key, []);
+    pairItems.get(key).push(item);
+
+    addToNetUsage(nets.na, item);
+    addToNetUsage(nets.nb, item);
+  }
+
+  for (const item of items || []) {
+    const type = String(item?.type ?? "").toLowerCase();
+    const nets = getTwoPinNetsForItem(item, nodes, fallbackNetMap, sol);
+
+    if (type === "battery" && nets) {
+      // Caz grav: borna + și borna − sunt unite doar prin cabluri/joncțiuni.
+      // Asta este scurtcircuitul cel mai clar vizual, deci colorăm traseul exact.
+      const path = shortestWireIndexPath(indexedGraph, nets.a.id, nets.b.id);
+      if (path && path.length) {
+        for (const wireIndex of path) result.add(wireIndex);
+      }
+    }
+
+    if (type === "ammeter" && nets) {
+      const sameBranchItems = pairItems.get(unorderedNetPair(nets)) || [];
+      const parallelLoad = sameBranchItems.some(
+        (x) => x.id !== item.id && isComponentLoadForDanger(x)
+      );
+
+      if (parallelLoad) {
+        markWiresTouchingItem(result, wires, nodes, item.id);
+      }
+    }
+
+    if (type === "voltmeter" && nets) {
+      const sameBranchItems = pairItems.get(unorderedNetPair(nets)) || [];
+      const hasParallelTarget = sameBranchItems.some(
+        (x) => x.id !== item.id && isComponentLoadForDanger(x)
+      );
+      const realOnA = (netUsage.get(nets.na) || []).filter(
+        (x) => x.id !== item.id && isComponentLoadForDanger(x)
+      );
+      const realOnB = (netUsage.get(nets.nb) || []).filter(
+        (x) => x.id !== item.id && isComponentLoadForDanger(x)
+      );
+
+      if (!hasParallelTarget && realOnA.length > 0 && realOnB.length > 0) {
+        markWiresTouchingItem(result, wires, nodes, item.id);
+      }
+    }
+
+    if (type === "bulb" && sol?.ok && nets) {
+      const voltage = Math.abs(voltageForNode(nets.a.id, sol) - voltageForNode(nets.b.id, sol));
+      const resistance = safeResistance(item.R ?? 30, 30);
+      const ratedPower = Math.max(0.000001, safeNumber(item.Pnom ?? item.ratedPowerW ?? 0.5, 0.5));
+      const power = (voltage * voltage) / resistance;
+      const inverted = item.polaritySensitive !== false && voltageForNode(nets.a.id, sol) - voltageForNode(nets.b.id, sol) < -0.01;
+
+      if (power > ratedPower * 1.1 || inverted) {
+        markWiresTouchingItem(result, wires, nodes, item.id);
+      }
+    }
+
+    if (type === "capacitor" && sol?.ok && nets) {
+      const vmax = Math.max(0.000001, safeNumber(item.Vmax ?? 9, 9));
+      const applied = Math.abs(voltageForNode(nets.a.id, sol) - voltageForNode(nets.b.id, sol));
+      const inverted = item.polaritySensitive !== false && voltageForNode(nets.a.id, sol) - voltageForNode(nets.b.id, sol) < -0.01;
+
+      if (applied > vmax * 1.05 || inverted) {
+        markWiresTouchingItem(result, wires, nodes, item.id);
+      }
+    }
+  }
+
+  return result;
+}
+
+function segmentLength(a, b) {
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function pointOnPolyline(pts, distance) {
+  if (!pts.length) return null;
+  if (pts.length === 1) return pts[0];
+
+  let total = 0;
+  const lengths = [];
+
+  for (let i = 0; i < pts.length - 1; i++) {
+    const len = segmentLength(pts[i], pts[i + 1]);
+    lengths.push(len);
+    total += len;
+  }
+
+  if (total <= 0.0001) return pts[0];
+
+  let d = ((distance % total) + total) % total;
+
+  for (let i = 0; i < lengths.length; i++) {
+    const len = lengths[i];
+    if (d <= len) {
+      const t = len <= 0.0001 ? 0 : d / len;
+      return {
+        x: pts[i].x + (pts[i + 1].x - pts[i].x) * t,
+        y: pts[i].y + (pts[i + 1].y - pts[i].y) * t,
+      };
+    }
+    d -= len;
+  }
+
+  return pts[pts.length - 1];
+}
+
+function drawCurrentParticles(ctx, pts, currentA, timeMs, wireIndex) {
+  if (!currentA || currentA < 0.000001) return;
+
+  let total = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    total += segmentLength(pts[i], pts[i + 1]);
+  }
+
+  if (total < 12) return;
+
+  // Scară didactică: curentul determină viteza și densitatea particulelor.
+  const normalized = Math.min(1, Math.log10(currentA * 1000 + 1) / 2.2);
+  const speedPxPerSec = 35 + normalized * 235;
+  const spacing = Math.max(24, 78 - normalized * 38);
+  const count = Math.max(1, Math.min(18, Math.ceil(total / spacing)));
+  const radius = 2.1 + normalized * 2.4;
+  const offset = (timeMs / 1000) * speedPxPerSec + wireIndex * 19;
+
+  ctx.save();
+  ctx.shadowColor = "rgba(103,232,249,0.9)";
+  ctx.shadowBlur = 10 + normalized * 12;
+
+  for (let i = 0; i < count; i++) {
+    const p = pointOnPolyline(pts, offset + i * spacing);
+    if (!p) continue;
+
+    ctx.beginPath();
+    ctx.fillStyle = `rgba(165,243,252,${0.62 + normalized * 0.32})`;
+    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.fillStyle = "rgba(255,255,255,0.94)";
+    ctx.arc(
+      p.x - radius * 0.28,
+      p.y - radius * 0.28,
+      Math.max(1, radius * 0.32),
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
 function drawWirePath(ctx, pts) {
   if (!pts.length) return;
 
@@ -157,10 +888,27 @@ function drawWirePath(ctx, pts) {
   ctx.stroke();
 }
 
-export function drawWires(ctx, nodes, wires, cam, wireState, renderStyle = "real") {
+export function drawWires(ctx, nodes, wires, cam, wireState, options = {}) {
   ctx.save();
 
+  const items = options.items ?? [];
+  const sol = options.sol ?? null;
+  const running = !!options.running;
+  const renderStyle = options.renderStyle ?? "real";
+  const timeMs = options.timeMs ?? 0;
+  const schematicMode = renderStyle === "schematic";
+  const showParticles = running && !schematicMode;
+  const wireFlowMap = showParticles
+    ? buildWireFlowMap(nodes, wires, items, sol)
+    : new Map();
+  // Firele devin roșii doar după Start. Altfel, în timpul construirii
+  // circuitului ar părea că aplicația acuză o greșeală înainte să simulezi.
+  const dangerWireSet = running
+    ? buildDangerWireSet(nodes, wires, items, sol)
+    : new Set();
+
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const itemMap = new Map((items || []).map((it) => [it.id, it]));
 
   function nodePos(id) {
     const n = nodeMap.get(id);
@@ -169,11 +917,11 @@ export function drawWires(ctx, nodes, wires, cam, wireState, renderStyle = "real
     return worldToScreen(n.x, n.y, cam);
   }
 
-  // wires - shadow/glow
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  for (const w of wires) {
+  for (let wireIndex = 0; wireIndex < wires.length; wireIndex++) {
+    const w = wires[wireIndex];
     const a = nodePos(w.aNodeId);
     const b = nodePos(w.bNodeId);
 
@@ -185,51 +933,88 @@ export function drawWires(ctx, nodes, wires, cam, wireState, renderStyle = "real
       b,
     ];
 
-    if (renderStyle === "schematic") {
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = "rgba(255,255,255,0.90)";
+    const isDangerWire = dangerWireSet.has(wireIndex);
+
+    if (schematicMode) {
+      ctx.lineWidth = isDangerWire ? 6 : 4;
+      ctx.strokeStyle = isDangerWire
+        ? "rgba(248,113,113,0.98)"
+        : "rgba(255,255,255,0.90)";
+      if (isDangerWire) {
+        ctx.shadowColor = "rgba(248,113,113,0.7)";
+        ctx.shadowBlur = 12;
+      }
       drawWirePath(ctx, pts);
+      ctx.shadowBlur = 0;
     } else {
-      ctx.lineWidth = 7;
-      ctx.strokeStyle = "rgba(70,160,255,0.13)";
+      ctx.lineWidth = isDangerWire ? 10 : 7;
+      ctx.strokeStyle = isDangerWire
+        ? "rgba(248,45,72,0.22)"
+        : "rgba(70,160,255,0.13)";
       drawWirePath(ctx, pts);
 
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = "rgba(120,200,255,0.88)";
+      ctx.lineWidth = isDangerWire ? 4.5 : 3;
+      ctx.strokeStyle = isDangerWire
+        ? "rgba(255,78,96,0.96)"
+        : "rgba(120,200,255,0.88)";
+      if (isDangerWire) {
+        ctx.shadowColor = "rgba(255,78,96,0.72)";
+        ctx.shadowBlur = 14;
+      }
       drawWirePath(ctx, pts);
+      ctx.shadowBlur = 0;
+    }
+
+    if (showParticles && !isDangerWire) {
+      const flow = wireFlowMap.get(makeEdgeKey(w.aNodeId, w.bNodeId)) || 0;
+      const currentA = Math.abs(flow);
+
+      if (currentA > 0.000001) {
+        // flow pozitiv = sensul aNodeId -> bNodeId; negativ = invers.
+        const directedPts = flow >= 0 ? pts : [...pts].reverse();
+        drawCurrentParticles(ctx, directedPts, currentA, timeMs, wireIndex);
+      }
     }
   }
 
   const activeNodeId = wireState?.startNodeId ?? null;
 
-  // În modul schematic nu desenăm cerculețele pinilor/joncțiunilor
-  // și nici badge-urile +/−, ca să arate ca o schemă de fizică.
-  if (renderStyle !== "schematic") {
-    // nodes
+  // În modul schemă lăsăm simbolurile curate, fără buline de pini/joncțiuni.
+  if (!schematicMode) {
     for (const n of nodes) {
-    const p = worldToScreen(n.x, n.y, cam);
-    const active = n.id === activeNodeId;
+      const p = worldToScreen(n.x, n.y, cam);
+      const active = n.id === activeNodeId;
 
-    const isJunction =
-      n.kind === "junction" ||
-      n.itemId == null ||
-      n.name === "junction";
+      const isJunction =
+        n.kind === "junction" ||
+        n.itemId == null ||
+        n.name === "junction";
 
-    if (isJunction) {
-      drawJunction(ctx, p.x, p.y, active);
-      continue;
+      if (isJunction) {
+        drawJunction(ctx, p.x, p.y, active);
+        continue;
+      }
+
+      drawComponentPin(ctx, p.x, p.y, active);
+
+      const item = itemMap.get(n.itemId);
+      let sign = null;
+
+      // Nu mai punem +/− generic pe orice componentă, fiindcă la rezistor/bec
+      // ar induce în eroare. Marcăm doar componentele polarizate unde sensul
+      // contează vizual.
+      if (item?.type === "battery") {
+        sign = n.name === "a" ? "+" : n.name === "b" ? "−" : null;
+      } else if (item?.type === "capacitor") {
+        sign = n.name === "a" ? "+" : n.name === "b" ? "−" : null;
+      } else if (item?.type === "diode") {
+        sign = n.name === "a" ? "A" : n.name === "b" ? "K" : null;
+      }
+
+      if (sign) {
+        drawBadge(ctx, p.x, p.y - 14, sign);
+      }
     }
-
-    drawComponentPin(ctx, p.x, p.y, active);
-
-    // label: a = −, b = +
-    const sign = n.name === "a" ? "−" : n.name === "b" ? "+" : null;
-
-    if (sign) {
-      drawBadge(ctx, p.x, p.y - 14, sign);
-    }
-  }
-
   }
 
   // preview wire
@@ -272,3 +1057,4 @@ export function drawWires(ctx, nodes, wires, cam, wireState, renderStyle = "real
 
   ctx.restore();
 }
+

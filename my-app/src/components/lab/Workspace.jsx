@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useRef } from "react";
 import CanvasStage from "./CanvasStage";
 import Overlay from "./Overlay";
 import HintBar from "./HintBar";
@@ -11,19 +11,6 @@ export default function Workspace() {
 
   const { state, actions } = useVoltLab();
   useWorkspaceEvents(workspaceRef, overlayRef);
-
-  useEffect(() => {
-    const raw = localStorage.getItem("voltlab:loadExample");
-    if (!raw) return;
-
-    try {
-      const snap = JSON.parse(raw);
-      localStorage.removeItem("voltlab:loadExample");
-      actions.loadSnapshot?.(snap);
-    } catch {
-      localStorage.removeItem("voltlab:loadExample");
-    }
-  }, []);
 
   return (
     <div

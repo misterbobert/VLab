@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { useVoltLab } from "./useVoltLabStore.jsx";
 import { drawInfiniteGrid, drawWires } from "../core/coords";
-import { renderComponentCanvas } from "../core/renderComponentCanvas";
 
 export function useCanvasRenderer(canvasRef) {
   const { state } = useVoltLab();
@@ -40,23 +39,42 @@ export function useCanvasRenderer(canvasRef) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // clear
-    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    let rafId = null;
+    let cancelled = false;
 
-    // grid
-    drawInfiniteGrid(ctx, canvas.clientWidth, canvas.clientHeight, state.cam);
+    function render(timeMs = 0) {
+      if (cancelled) return;
 
-    // wires
-    drawWires(ctx, state.nodes, state.wires, state.cam, state.wire, state.renderStyle);
+      // clear
+      ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
 
-    // În modul schematic, componentele se desenează pe canvas.
-    // Overlay-ul vechi rămâne invizibil doar pentru interacțiuni.
-    if (state.renderStyle === "schematic") {
-      for (const item of state.items) {
-        renderComponentCanvas(ctx, item, state.cam, "schematic", state.items);
+      // grid
+      drawInfiniteGrid(ctx, canvas.clientWidth, canvas.clientHeight, state.cam);
+
+      // wires + particule de curent în modul vizual
+      drawWires(ctx, state.nodes, state.wires, state.cam, state.wire, {
+        items: state.items,
+        running: state.running || state.isRunning,
+        renderStyle: state.renderStyle ?? "real",
+        sol: state.sol,
+        timeMs,
+      });
+
+      const shouldAnimate =
+        (state.running || state.isRunning) &&
+        (state.renderStyle ?? "real") !== "schematic";
+
+      if (shouldAnimate) {
+        rafId = window.requestAnimationFrame(render);
       }
     }
 
+    render(performance.now());
+
+    return () => {
+      cancelled = true;
+      if (rafId) window.cancelAnimationFrame(rafId);
+    };
   }, [
     canvasRef,
     state.cam,
@@ -64,6 +82,9 @@ export function useCanvasRenderer(canvasRef) {
     state.wires,
     state.wire,
     state.items,
+    state.sol,
+    state.running,
+    state.isRunning,
     state.renderStyle,
   ]);
 }
