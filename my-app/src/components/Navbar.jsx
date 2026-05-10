@@ -32,6 +32,10 @@ export default function Navbar() {
           Exemple
         </NavLink>
 
+        <NavLink to="/tests" className={linkClass}>
+          Teste
+        </NavLink>
+
         <NavLink to="/about" className={linkClass}>
           Despre
         </NavLink>

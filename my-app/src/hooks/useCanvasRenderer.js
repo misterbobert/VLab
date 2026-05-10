@@ -1,6 +1,27 @@
 import { useEffect } from "react";
 import { useVoltLab } from "./useVoltLabStore.jsx";
 import { drawInfiniteGrid, drawWires } from "../core/coords";
+import { renderComponentCanvas } from "../core/renderComponentCanvas";
+
+function normalizeRenderStyle(value) {
+  return value === "schematic" || value === "schema" || value === "fizica"
+    ? "schematic"
+    : "real";
+}
+
+function getRenderStyle(state) {
+  const fromState = normalizeRenderStyle(state?.renderStyle);
+  if (fromState === "schematic") return "schematic";
+
+  // Fallback util dacă store-ul a fost restaurat temporar dintr-o variantă
+  // mai veche, dar utilizatorul avea modul salvat în localStorage.
+  try {
+    const saved = localStorage.getItem("voltlab:renderStyle");
+    return normalizeRenderStyle(saved);
+  } catch {
+    return fromState;
+  }
+}
 
 export function useCanvasRenderer(canvasRef) {
   const { state } = useVoltLab();
@@ -45,26 +66,45 @@ export function useCanvasRenderer(canvasRef) {
     function render(timeMs = 0) {
       if (cancelled) return;
 
-      // clear
-      ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+      const width = canvas.clientWidth || canvas.width;
+      const height = canvas.clientHeight || canvas.height;
+      const renderStyle = getRenderStyle(state);
+      const schematicMode = renderStyle === "schematic";
+      const running = !!(state.running || state.isRunning);
 
-      // grid
-      drawInfiniteGrid(ctx, canvas.clientWidth, canvas.clientHeight, state.cam);
+      ctx.clearRect(0, 0, width, height);
+      drawInfiniteGrid(ctx, width, height, state.cam);
 
-      // wires + particule de curent în modul vizual
-      drawWires(ctx, state.nodes, state.wires, state.cam, state.wire, {
-        items: state.items,
-        running: state.running || state.isRunning,
-        renderStyle: state.renderStyle ?? "real",
-        sol: state.sol,
-        timeMs,
-      });
+      // Firele sunt desenate prima dată. În mod schematic, componentele sunt
+      // desenate DUPĂ fire, ca simbolurile să fie mereu vizibile peste cabluri.
+      try {
+        drawWires(ctx, state.nodes, state.wires, state.cam, state.wire, {
+          items: state.items,
+          running,
+          renderStyle,
+          sol: state.sol,
+          timeMs,
+          particlesEnabled: state.particleFlowEnabled ?? true,
+        });
+      } catch (err) {
+        // Dacă animația particulelor are vreun caz-limită, nu lăsăm canvas-ul
+        // schematic gol. Componentele se desenează în continuare.
+        console.warn("VoltLab wire render failed:", err);
+      }
 
-      const shouldAnimate =
-        (state.running || state.isRunning) &&
-        (state.renderStyle ?? "real") !== "schematic";
+      if (schematicMode) {
+        for (const item of state.items) {
+          try {
+            renderComponentCanvas(ctx, item, state.cam, "schematic", state.items);
+          } catch (err) {
+            console.warn("VoltLab schematic component render failed:", item?.type, err);
+          }
+        }
+      }
 
-      if (shouldAnimate) {
+      // În modul vizual, particulele au nevoie de requestAnimationFrame ca să
+      // curgă continuu. În schematic nu animăm, ca să rămână curat și stabil.
+      if (running && !schematicMode) {
         rafId = window.requestAnimationFrame(render);
       }
     }
@@ -86,5 +126,6 @@ export function useCanvasRenderer(canvasRef) {
     state.running,
     state.isRunning,
     state.renderStyle,
+    state.particleFlowEnabled,
   ]);
 }

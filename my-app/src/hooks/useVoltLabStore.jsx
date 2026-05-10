@@ -30,12 +30,20 @@ function getInitialRenderStyle() {
     : "real";
 }
 
+function getInitialParticleFlowEnabled() {
+  if (typeof window === "undefined") return true;
+
+  // implicit pornit; îl dezactivezi din Toolbar când vrei canvas mai curat
+  return localStorage.getItem("voltlab:particleFlow") !== "off";
+}
+
 const initialState = {
   mode: "select",
   running: false,
   isRunning: false,
   statusText: "Ready",
   renderStyle: getInitialRenderStyle(),
+  particleFlowEnabled: getInitialParticleFlowEnabled(),
 
   items: [],
   nodes: [],
@@ -135,25 +143,6 @@ function resetCalculatedValues(items) {
       copy.displayPower = "—";
     }
 
-    if (copy.type === "potentiometer") {
-      copy.displayVoltage = "—";
-      copy.displayCurrent = "—";
-      copy.displayPower = "—";
-    }
-
-    if (copy.type === "diode") {
-      copy.displayState = "—";
-      copy.displayVoltage = "—";
-      copy.displayCurrent = "—";
-    }
-
-    if (copy.type === "transistor_npn" || copy.type === "transistor_pnp") {
-      copy.displayState = "—";
-      copy.displayVbe = "—";
-      copy.displayVce = "—";
-      copy.displayIc = "—";
-    }
-
     if (copy.type === "battery") {
       copy.displayCurrent = "—";
       copy.displayPower = "—";
@@ -224,13 +213,33 @@ function reducer(state, action) {
       const renderStyle =
         action.renderStyle === "schematic" ? "schematic" : "real";
 
-      if (typeof window !== "undefined") {
+      try {
         localStorage.setItem("voltlab:renderStyle", renderStyle);
+      } catch {
+        // ignore storage errors
       }
 
       return {
         ...state,
         renderStyle,
+      };
+    }
+
+    case "SET_PARTICLE_FLOW_ENABLED": {
+      const particleFlowEnabled = action.enabled !== false;
+
+      try {
+        localStorage.setItem(
+          "voltlab:particleFlow",
+          particleFlowEnabled ? "on" : "off"
+        );
+      } catch {
+        // ignore storage errors
+      }
+
+      return {
+        ...state,
+        particleFlowEnabled,
       };
     }
 
@@ -321,62 +330,93 @@ export function VoltLabProvider({ children }) {
   const workspaceElRef = useRef(null);
 
   useEffect(() => {
-    const raw = localStorage.getItem("voltlab:loadExample");
-    if (!raw) return;
+    function loadPendingExample() {
+      const raw = localStorage.getItem("voltlab:loadExample");
+      if (!raw) return false;
 
-    try {
-      const snap = JSON.parse(raw);
+      try {
+        const snap = JSON.parse(raw);
 
-      localStorage.removeItem("voltlab:loadExample");
+        localStorage.removeItem("voltlab:loadExample");
 
-      if (!snap?.items || !snap?.nodes || !snap?.wires) return;
+        if (!snap?.items || !snap?.nodes || !snap?.wires) return false;
 
-      dispatch({ type: "SET_RUNNING", running: false });
-      dispatch({ type: "SET_SOLUTION", sol: null });
-      dispatch({ type: "SET_SAFETY_DIALOG", dialog: null });
+        const current = stateRef.current;
 
-      dispatch({
-        type: "SET_ITEMS_NODES_WIRES",
-        items: snap.items,
-        nodes: snap.nodes,
-        wires: snap.wires,
-      });
+        dispatch({ type: "SET_RUNNING", running: false });
+        dispatch({ type: "SET_SOLUTION", sol: null });
+        dispatch({ type: "SET_SAFETY_DIALOG", dialog: null });
 
-      dispatch({ type: "SET_SELECTED", id: snap.selectedId ?? null });
+        dispatch({
+          type: "SET_ITEMS_NODES_WIRES",
+          items: snap.items,
+          nodes: snap.nodes,
+          wires: snap.wires,
+        });
 
-      dispatch({
-        type: "SET_SELECTED_WIRE_SEGMENT",
-        segment: snap.selectedWireSegment ?? null,
-      });
+        dispatch({ type: "SET_SELECTED", id: snap.selectedId ?? null });
 
-      dispatch({
-        type: "SET_LAST_TOUCHED",
-        target: snap.lastTouched ?? null,
-      });
+        dispatch({
+          type: "SET_SELECTED_WIRE_SEGMENT",
+          segment: snap.selectedWireSegment ?? null,
+        });
 
-      const centeredCam = snap.autoCenter
-        ? {
-            x: Math.round(window.innerWidth / 2),
-            y: Math.round(window.innerHeight / 2),
-            z: snap.cam?.z ?? 0.85,
-          }
-        : snap.cam ?? { x: 0, y: 0, z: 1 };
+        dispatch({
+          type: "SET_LAST_TOUCHED",
+          target: snap.lastTouched ?? null,
+        });
 
-      dispatch({ type: "SET_CAM", cam: centeredCam });
-      dispatch({ type: "SET_MODE", mode: snap.mode ?? "select" });
+        const centeredCam = snap.autoCenter
+          ? {
+              x: Math.round(window.innerWidth / 2),
+              y: Math.round(window.innerHeight / 2),
+              z: snap.cam?.z ?? 0.85,
+            }
+          : snap.cam ?? { x: 0, y: 0, z: 1 };
 
-      dispatch({
-        type: "SET_WIRE_STATE",
-        wire: { startNodeId: null, points: [], previewWorld: null },
-      });
+        dispatch({ type: "SET_CAM", cam: centeredCam });
+        dispatch({ type: "SET_MODE", mode: snap.mode ?? "select" });
+        dispatch({
+          type: "SET_RENDER_STYLE",
+          renderStyle: snap.renderStyle ?? current.renderStyle ?? "real",
+        });
 
-      dispatch({
-        type: "SET_STATUS",
-        text: "Example loaded",
-      });
-    } catch {
-      localStorage.removeItem("voltlab:loadExample");
+        dispatch({
+          type: "SET_WIRE_STATE",
+          wire: { startNodeId: null, points: [], previewWorld: null },
+        });
+
+        dispatch({
+          type: "SET_STATUS",
+          text: "Example loaded",
+        });
+
+        return true;
+      } catch {
+        localStorage.removeItem("voltlab:loadExample");
+        return false;
+      }
     }
+
+    // La mount: încărcare normală după refresh.
+    loadPendingExample();
+
+    // Când apeși TESTEAZĂ din pagina Exemple, Provider-ul rămâne montat, deci
+    // efectul de mount nu mai rula. Acceptăm atât eveniment explicit, cât și un
+    // poll foarte ușor pe localStorage, ca să funcționeze și cu Examples.jsx vechi.
+    const onLoadExample = () => loadPendingExample();
+    window.addEventListener("voltlab:loadExample", onLoadExample);
+
+    const pollId = window.setInterval(() => {
+      if (localStorage.getItem("voltlab:loadExample")) {
+        loadPendingExample();
+      }
+    }, 160);
+
+    return () => {
+      window.removeEventListener("voltlab:loadExample", onLoadExample);
+      window.clearInterval(pollId);
+    };
   }, []);
 
   useEffect(() => {
@@ -393,6 +433,8 @@ export function VoltLabProvider({ children }) {
       lastTouched: state.lastTouched,
       cam: state.cam,
       mode: state.mode,
+      renderStyle: state.renderStyle,
+      particleFlowEnabled: state.particleFlowEnabled,
     }),
 
     restoreSnapshot: (snap) => {
@@ -510,8 +552,23 @@ export function VoltLabProvider({ children }) {
       setStatus(
         nextStyle === "schematic"
           ? "Mod schemă de fizică"
-          : "Mod vizual realist"
+          : "Mod vizual"
       );
+    }
+
+    function setParticleFlowEnabled(enabled) {
+      const next = enabled !== false;
+
+      dispatch({
+        type: "SET_PARTICLE_FLOW_ENABLED",
+        enabled: next,
+      });
+
+      setStatus(next ? "Particule curent activate" : "Particule curent oprite");
+    }
+
+    function toggleParticleFlow() {
+      setParticleFlowEnabled(!(state.particleFlowEnabled ?? true));
     }
 
     function setCam(patch) {
@@ -1359,17 +1416,9 @@ export function VoltLabProvider({ children }) {
         target: snap.lastTouched ?? null,
       });
 
-      const nextCam = snap.autoCenter
-        ? {
-            x: Math.round(window.innerWidth / 2),
-            y: Math.round(window.innerHeight / 2),
-            z: snap.cam?.z ?? 0.85,
-          }
-        : snap.cam ?? { x: 0, y: 0, z: 1 };
-
       dispatch({
         type: "SET_CAM",
-        cam: nextCam,
+        cam: snap.cam ?? { x: 0, y: 0, z: 1 },
       });
 
       dispatch({ type: "SET_MODE", mode: snap.mode ?? "select" });
@@ -1385,6 +1434,8 @@ export function VoltLabProvider({ children }) {
     return {
       setMode,
       setRenderStyle,
+      setParticleFlowEnabled,
+      toggleParticleFlow,
       setStatus,
       setCam,
 

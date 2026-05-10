@@ -255,174 +255,205 @@ function voltageDiff(aNode, bNode, sol) {
   return voltageForNode(aNode.id, sol) - voltageForNode(bNode.id, sol);
 }
 
-function demand(sourcePin, sinkPin, current) {
-  if (!sourcePin || !sinkPin) return null;
-  const amount = Math.abs(Number(current));
-  if (!Number.isFinite(amount) || amount < 0.000001) return null;
-  if (sourcePin.id === sinkPin.id) return null;
-  return { source: sourcePin.id, sink: sinkPin.id, current: amount };
+
+function addPinInjection(map, pin, amount) {
+  if (!pin || !pin.id) return;
+  const n = Number(amount);
+  if (!Number.isFinite(n) || Math.abs(n) < 1e-9) return;
+  map.set(pin.id, (map.get(pin.id) || 0) + n);
 }
 
-function passiveDemand(aPin, bPin, sol, resistance, fallbackCurrent = 0) {
-  if (!aPin || !bPin || !sol?.ok) return null;
+function addComponentCurrent(map, pinA, pinB, currentAtoB) {
+  const I = Number(currentAtoB);
+  if (!pinA || !pinB || !Number.isFinite(I) || Math.abs(I) < 1e-9) return;
 
-  const dv = voltageDiff(aPin, bPin, sol);
-  let current = Math.abs(dv) / Math.max(1e-9, resistance);
-  if (!Number.isFinite(current) || current < 0.000001) {
-    current = Math.abs(fallbackCurrent || 0);
+  // Convenție:
+  // currentAtoB > 0 înseamnă curent prin componentă de la A la B.
+  // Deci la A curentul INTRĂ în componentă => componenta scoate -I în cablu.
+  // La B curentul IESE din componentă => componenta scoate +I în cablu.
+  addPinInjection(map, pinA, -I);
+  addPinInjection(map, pinB, I);
+}
+
+function addSourceTerminalCurrent(map, pinA, pinB, sourceCurrentAtoInside) {
+  const I = Number(sourceCurrentAtoInside);
+  if (!pinA || !pinB || !Number.isFinite(I) || Math.abs(I) < 1e-9) return;
+
+  // Pentru sursele de tensiune din MNA, Ivs este curentul care intră în sursă
+  // prin pinul A. Asta dă direct injecția în cabluri:
+  // pinA = -Ivs, pinB = +Ivs.
+  addPinInjection(map, pinA, -I);
+  addPinInjection(map, pinB, I);
+}
+
+function addPassiveTwoPin(map, aPin, bPin, sol, resistance, fallbackAbsCurrent = 0) {
+  if (!aPin || !bPin || !sol?.ok) return;
+
+  const R = Math.max(1e-9, resistance);
+  let Iab = voltageDiff(aPin, bPin, sol) / R;
+
+  if ((!Number.isFinite(Iab) || Math.abs(Iab) < 1e-9) && fallbackAbsCurrent > 1e-9) {
+    const dv = voltageDiff(aPin, bPin, sol);
+    Iab = (dv >= 0 ? 1 : -1) * Math.abs(fallbackAbsCurrent);
   }
 
-  if (current < 0.000001) return null;
-
-  // Curent convențional prin componentă: intră pe pinul cu tensiune mai mare
-  // și iese pe pinul cu tensiune mai mică. Pe FIRE, sursa este pinul de ieșire
-  // al componentei, iar destinația este pinul unde curentul intră în componentă.
-  if (dv >= 0) return demand(bPin, aPin, current);
-  return demand(aPin, bPin, current);
+  addComponentCurrent(map, aPin, bPin, Iab);
 }
 
-function batteryCurrentFromSol(item, sol) {
+function addBatteryInjection(map, item, aPin, bPin, sol) {
   const meta = sol?.batterySourceByItemId?.get?.(item.id);
-  if (meta && sol?.mna?.Ivs) {
-    const n = Math.abs(sol.mna.Ivs[meta.sourceIndex] ?? 0);
-    if (Number.isFinite(n) && n > 0.000001) return n;
-  }
+  const signed = meta ? Number(sol?.mna?.Ivs?.[meta.sourceIndex] ?? 0) : NaN;
 
-  return itemCurrentAbs(item);
-}
-
-function componentDemands(item, nodes, sol) {
-  if (!item?.id || !sol?.ok) return [];
-
-  const pins = itemPins(nodes, item.id);
-  const type = String(item.type ?? "").toLowerCase();
-
-  if (type === "transistor" || type === "transistornpn" || type === "transistorpnp" || type === "npn" || type === "pnp") {
-    const bPin = pinByName(pins, "B", 0) || pinByName(pins, "base", 0);
-    const cPin = pinByName(pins, "C", 1) || pinByName(pins, "collector", 1);
-    const ePin = pinByName(pins, "E", 2) || pinByName(pins, "emitter", 2);
-    if (!bPin || !cPin || !ePin) return [];
-
-    const variant = String(item.variant ?? item.kind ?? item.transistorType ?? item.type).toUpperCase();
-    const ronCE = safeResistance(item.RonCE ?? item.ronCE ?? 100, 100);
-    const vc = voltageForNode(cPin.id, sol);
-    const ve = voltageForNode(ePin.id, sol);
-    const fallback = itemCurrentAbs(item);
-
-    if (variant.includes("PNP")) {
-      const current = Math.max(Math.abs((ve - vc) / ronCE), fallback);
-      const d = demand(cPin, ePin, current); // componentă E -> C, deci pe fire C -> E
-      return d ? [d] : [];
-    }
-
-    const current = Math.max(Math.abs((vc - ve) / ronCE), fallback);
-    const d = demand(ePin, cPin, current); // componentă C -> E, deci pe fire E -> C
-    return d ? [d] : [];
-  }
-
-  const a = pinByName(pins, "a", 0);
-  const b = pinByName(pins, "b", 1);
-  if (!a || !b) return [];
-
-  if (type === "battery") {
-    const meta = sol?.batterySourceByItemId?.get?.(item.id);
-    const signedSourceCurrent = meta ? Number(sol?.mna?.Ivs?.[meta.sourceIndex] ?? 0) : NaN;
-
-    if (Number.isFinite(signedSourceCurrent) && Math.abs(signedSourceCurrent) > 0.000001) {
-      // În solveMNA, curentul sursei de tensiune este definit din pinul a
-      // spre nodul intern. Când bateria livrează energie în exterior, acest
-      // curent este de obicei negativ, deci particulele ies din pinul a și
-      // se întorc prin pinul b. Dacă bateria este încărcată / opusă, sensul
-      // se inversează. Asta repară cazurile cu 2 baterii în serie/opuse.
-      const d = signedSourceCurrent < 0
-        ? demand(a, b, Math.abs(signedSourceCurrent))
-        : demand(b, a, Math.abs(signedSourceCurrent));
-      return d ? [d] : [];
-    }
-
-    const current = batteryCurrentFromSol(item, sol);
-    const va = voltageForNode(a.id, sol);
-    const vb = voltageForNode(b.id, sol);
-    const d = va >= vb ? demand(a, b, current) : demand(b, a, current);
-    return d ? [d] : [];
-  }
-
-  if (type === "resistor") {
-    const d = passiveDemand(a, b, sol, safeResistance(item.R ?? 100, 100));
-    return d ? [d] : [];
-  }
-
-  if (type === "potentiometer") {
-    const r =
-      item.R ??
-      item.resistance ??
-      item.currentR ??
-      item.displayResistance ??
-      Math.max(
-        1,
-        safeResistance(item.Rmin ?? 0, 0) +
-          (safeResistance(item.Rmax ?? 10000, 10000) - safeResistance(item.Rmin ?? 0, 0)) *
-            (safeNumber(item.positionPct ?? item.position ?? 50, 50) / 100)
-      );
-
-    const d = passiveDemand(a, b, sol, safeResistance(r, 10000));
-    return d ? [d] : [];
-  }
-
-  if (type === "bulb") {
-    const d = passiveDemand(a, b, sol, safeResistance(item.R ?? 30, 30));
-    return d ? [d] : [];
-  }
-
-  if (type === "switch") {
-    if (!item.closed) return [];
-    const d = passiveDemand(a, b, sol, 1e-4);
-    return d ? [d] : [];
-  }
-
-  if (type === "ammeter") {
-    const d = passiveDemand(a, b, sol, 1e-4);
-    return d ? [d] : [];
-  }
-
-  if (type === "voltmeter" || type === "ohmmeter") {
-    return [];
-  }
-
-  if (type === "capacitor") {
-    const meta = sol?.capacitorSourceByItemId?.get?.(item.id);
-    const signedSourceCurrent = meta ? Number(sol?.mna?.Ivs?.[meta.sourceIndex] ?? 0) : NaN;
-
-    if (Number.isFinite(signedSourceCurrent) && Math.abs(signedSourceCurrent) > 0.000001) {
-      // Condensatorul încărcat este modelat ca sursă temporară. Folosim
-      // semnul curentului MNA exact ca la baterie, altfel la 2 condensatori
-      // particulele pot părea că ies simultan din ambele capete.
-      const d = signedSourceCurrent < 0
-        ? demand(a, b, Math.abs(signedSourceCurrent))
-        : demand(b, a, Math.abs(signedSourceCurrent));
-      return d ? [d] : [];
-    }
-
-    const current = itemCurrentAbs(item);
-    if (current <= 0.000001) return [];
-    const d = passiveDemand(a, b, sol, safeResistance(item.ESR ?? 0.5, 0.5), current);
-    return d ? [d] : [];
-  }
-
-  if (type === "diode") {
-    const vf = safeNumber(item.Vf ?? item.forwardVoltage, 0.7);
-    const ron = safeResistance(item.Ron ?? item.ron, 8);
-    const dv = voltageDiff(a, b, sol);
-    const current = dv > vf ? (dv - vf) / ron : itemCurrentAbs(item);
-    const d = current > 0.000001 ? demand(b, a, current) : null; // A -> K prin diodă, deci pe fire K -> A
-    return d ? [d] : [];
+  if (Number.isFinite(signed) && Math.abs(signed) > 1e-9) {
+    addSourceTerminalCurrent(map, aPin, bPin, signed);
+    return;
   }
 
   const fallback = itemCurrentAbs(item);
-  if (fallback <= 0.000001) return [];
+  if (fallback <= 1e-9) return;
 
-  const d = passiveDemand(a, b, sol, 1, fallback);
-  return d ? [d] : [];
+  const va = voltageForNode(aPin.id, sol);
+  const vb = voltageForNode(bPin.id, sol);
+  if (va >= vb) {
+    addPinInjection(map, aPin, fallback);
+    addPinInjection(map, bPin, -fallback);
+  } else {
+    addPinInjection(map, bPin, fallback);
+    addPinInjection(map, aPin, -fallback);
+  }
+}
+
+function addCapacitorInjection(map, item, aPin, bPin, sol) {
+  const meta = sol?.capacitorSourceByItemId?.get?.(item.id);
+  const signed = meta ? Number(sol?.mna?.Ivs?.[meta.sourceIndex] ?? 0) : NaN;
+
+  if (Number.isFinite(signed) && Math.abs(signed) > 1e-9) {
+    addSourceTerminalCurrent(map, aPin, bPin, signed);
+    return;
+  }
+
+  // Când condensatorul este neîncărcat, modelul didactic îl încarcă în
+  // powerDynamics, nu ca element MNA. Pentru animație folosim sensul tensiunii
+  // aplicate și curentul afișat, dacă există.
+  const fallback = itemCurrentAbs(item);
+  if (fallback <= 1e-9) return;
+
+  const dv = voltageDiff(aPin, bPin, sol);
+  addComponentCurrent(map, aPin, bPin, (dv >= 0 ? 1 : -1) * fallback);
+}
+
+function addDiodeInjection(map, item, aPin, bPin, sol) {
+  const meta = sol?.diodeMetaByItemId?.get?.(item.id);
+
+  if (meta?.active && meta.sourceIndex != null) {
+    const signed = Number(sol?.mna?.Ivs?.[meta.sourceIndex] ?? 0);
+    if (Number.isFinite(signed) && Math.abs(signed) > 1e-9) {
+      addSourceTerminalCurrent(map, aPin, bPin, signed);
+      return;
+    }
+  }
+
+  const R = meta?.active
+    ? safeResistance(item.Ron ?? item.ron ?? 1, 1)
+    : safeResistance(item.Roff ?? item.roff ?? 1000000000, 1000000000);
+  addPassiveTwoPin(map, aPin, bPin, sol, R, itemCurrentAbs(item));
+}
+
+function addTransistorInjection(map, item, nodes, sol) {
+  const pins = itemPins(nodes, item.id);
+  const bPin = pinByName(pins, "b", 0) || pinByName(pins, "B", 0) || pinByName(pins, "base", 0);
+  const cPin = pinByName(pins, "c", 1) || pinByName(pins, "C", 1) || pinByName(pins, "collector", 1);
+  const ePin = pinByName(pins, "e", 2) || pinByName(pins, "E", 2) || pinByName(pins, "emitter", 2);
+  if (!bPin || !cPin || !ePin) return;
+
+  const type = String(item.type ?? "").toLowerCase();
+  const variant = String(item.variant ?? item.kind ?? item.transistorType ?? item.type ?? "NPN").toUpperCase();
+  const isPnp = type.includes("pnp") || variant.includes("PNP");
+  const meta = sol?.transistorMetaByItemId?.get?.(item.id);
+
+  // Ramura colector-emitor este modelată ca rezistență Rce.
+  const Rce = safeResistance(meta?.Rce ?? item.RonCE ?? item.ronCE ?? item.RoffCE ?? 1000000000, 1000000000);
+  addPassiveTwoPin(map, cPin, ePin, sol, Rce, itemCurrentAbs(item));
+
+  // Ramura bază-emitor, dacă tranzistorul este pornit, este o sursă Vbe + Rbe.
+  if (meta?.baseSourceIndex != null) {
+    const signed = Number(sol?.mna?.Ivs?.[meta.baseSourceIndex] ?? 0);
+    if (Number.isFinite(signed) && Math.abs(signed) > 1e-9) {
+      if (isPnp) {
+        // În solver, PNP-ul are sursa între E și B.
+        addSourceTerminalCurrent(map, ePin, bPin, signed);
+      } else {
+        // NPN-ul are sursa între B și E.
+        addSourceTerminalCurrent(map, bPin, ePin, signed);
+      }
+    }
+    return;
+  }
+
+  // Când e oprit, lăsăm doar o scurgere foarte mică, dacă apare numeric.
+  const RbeOff = safeResistance(item.RoffCE ?? item.RbeOff ?? 1000000000, 1000000000);
+  addPassiveTwoPin(map, bPin, ePin, sol, RbeOff, 0);
+}
+
+function buildPinInjectionMap(nodes, items, sol) {
+  const map = new Map();
+  if (!sol?.ok) return map;
+
+  for (const item of items || []) {
+    if (!item?.id) continue;
+    const type = String(item.type ?? "").toLowerCase();
+
+    if (
+      type === "transistor" ||
+      type === "transistor_npn" ||
+      type === "transistor_pnp" ||
+      type === "npn" ||
+      type === "pnp"
+    ) {
+      addTransistorInjection(map, item, nodes, sol);
+      continue;
+    }
+
+    const pins = itemPins(nodes, item.id);
+    const a = pinByName(pins, "a", 0);
+    const b = pinByName(pins, "b", 1);
+    if (!a || !b) continue;
+
+    if (type === "battery") {
+      addBatteryInjection(map, item, a, b, sol);
+    } else if (type === "capacitor") {
+      addCapacitorInjection(map, item, a, b, sol);
+    } else if (type === "diode") {
+      addDiodeInjection(map, item, a, b, sol);
+    } else if (type === "resistor") {
+      addPassiveTwoPin(map, a, b, sol, safeResistance(item.R ?? 100, 100));
+    } else if (type === "potentiometer") {
+      const r =
+        item.R ??
+        item.resistance ??
+        item.currentR ??
+        Math.max(
+          1,
+          safeResistance(item.Rmin ?? 0, 0) +
+            (safeResistance(item.Rmax ?? 10000, 10000) - safeResistance(item.Rmin ?? 0, 0)) *
+              (safeNumber(item.positionPct ?? item.position ?? 50, 50) / 100)
+        );
+      addPassiveTwoPin(map, a, b, sol, safeResistance(r, 10000));
+    } else if (type === "bulb") {
+      addPassiveTwoPin(map, a, b, sol, safeResistance(item.R ?? 30, 30));
+    } else if (type === "switch") {
+      if (item.closed) addPassiveTwoPin(map, a, b, sol, 1e-4);
+    } else if (type === "ammeter") {
+      addPassiveTwoPin(map, a, b, sol, 1e-4);
+    }
+  }
+
+  // Curățăm zgomotul numeric foarte mic.
+  for (const [id, value] of [...map.entries()]) {
+    if (!Number.isFinite(value) || Math.abs(value) < 1e-7) map.delete(id);
+  }
+
+  return map;
 }
 
 function makeEdgeKey(a, b) {
@@ -519,13 +550,9 @@ function buildWireFlowMap(nodes, wires, items, sol) {
     wireMap.set(makeEdgeKey(wires[i].aNodeId, wires[i].bNodeId), i);
   }
 
-  const allDemands = [];
-  for (const item of items || []) {
-    allDemands.push(...componentDemands(item, nodes, sol));
-  }
-
+  const injections = buildPinInjectionMap(nodes, items, sol);
   const flowMap = new Map();
-  if (!allDemands.length) return flowMap;
+  if (!injections.size) return flowMap;
 
   const groups = connectedComponentsOfWireGraph(adj);
 
@@ -533,22 +560,26 @@ function buildWireFlowMap(nodes, wires, items, sol) {
     const sources = [];
     const sinks = [];
 
-    for (const d of allDemands) {
-      if (group.has(d.source)) sources.push({ id: d.source, amount: d.current });
-      if (group.has(d.sink)) sinks.push({ id: d.sink, amount: d.current });
+    for (const nodeId of group) {
+      const amount = injections.get(nodeId) || 0;
+      if (amount > 1e-7) sources.push({ id: nodeId, amount });
+      if (amount < -1e-7) sinks.push({ id: nodeId, amount: -amount });
     }
 
     if (!sources.length || !sinks.length) continue;
 
+    // Într-o rețea de fire ideale cu bucle, distribuția exactă pe fiecare
+    // segment nu este unică. Alegem o distribuție validă KCL: fiecare injecție
+    // pozitivă este rutată către cele mai apropiate consumuri negative.
     for (const source of sources) {
       let remainingSource = source.amount;
 
-      while (remainingSource > 0.000001) {
+      while (remainingSource > 1e-7) {
         let bestSink = null;
         let bestPath = null;
 
         for (const sink of sinks) {
-          if (sink.amount <= 0.000001) continue;
+          if (sink.amount <= 1e-7) continue;
           const path = shortestWirePath(adj, source.id, sink.id);
           if (!path || path.length < 2) continue;
           if (!bestPath || path.length < bestPath.length) {
@@ -572,7 +603,6 @@ function buildWireFlowMap(nodes, wires, items, sol) {
 
   return flowMap;
 }
-
 
 function normalizedPairKey(a, b) {
   return [String(a), String(b)].sort().join("__");
@@ -840,28 +870,41 @@ function drawCurrentParticles(ctx, pts, currentA, timeMs, wireIndex) {
   if (total < 12) return;
 
   // Scară didactică: curentul determină viteza și densitatea particulelor.
+  // Important: particulele NU mai sunt distribuite cu modulo pe lungimea totală
+  // a firului. Asta producea efectul urât în care pe fire lungi nu mai apărea
+  // nimic lângă componenta-sursă până când particulele vechi ajungeau la capăt.
+  // Acum faza se repetă la fiecare `spacing`, deci se emit particule continuu.
   const normalized = Math.min(1, Math.log10(currentA * 1000 + 1) / 2.2);
-  const speedPxPerSec = 35 + normalized * 235;
-  const spacing = Math.max(24, 78 - normalized * 38);
-  const count = Math.max(1, Math.min(18, Math.ceil(total / spacing)));
-  const radius = 2.1 + normalized * 2.4;
-  const offset = (timeMs / 1000) * speedPxPerSec + wireIndex * 19;
+  const speedPxPerSec = 42 + normalized * 260;
+  const spacing = Math.max(22, 58 - normalized * 28);
+  const radius = 2.0 + normalized * 2.2;
+  const seed = (wireIndex * 13) % spacing;
+  const phase = (((timeMs / 1000) * speedPxPerSec + seed) % spacing + spacing) % spacing;
 
   ctx.save();
   ctx.shadowColor = "rgba(103,232,249,0.9)";
   ctx.shadowBlur = 10 + normalized * 12;
 
-  for (let i = 0; i < count; i++) {
-    const p = pointOnPolyline(pts, offset + i * spacing);
+  // Desenăm pe toată lungimea firului. Prima particulă este mereu la cel mult
+  // `spacing` px de început, deci nu mai există pauze mari de emisie.
+  for (let d = phase; d < total + spacing * 0.5; d += spacing) {
+    if (d < 0 || d > total) continue;
+
+    const p = pointOnPolyline(pts, d);
     if (!p) continue;
 
+    // Ușor fade-in la început și fade-out la capăt, ca să pară că intră/iese
+    // din componentă, nu că se teleportează.
+    const edgeFade = Math.min(1, d / 18, (total - d) / 18);
+    const alpha = (0.58 + normalized * 0.34) * Math.max(0.25, edgeFade);
+
     ctx.beginPath();
-    ctx.fillStyle = `rgba(165,243,252,${0.62 + normalized * 0.32})`;
+    ctx.fillStyle = `rgba(165,243,252,${alpha})`;
     ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.beginPath();
-    ctx.fillStyle = "rgba(255,255,255,0.94)";
+    ctx.fillStyle = `rgba(255,255,255,${0.72 + normalized * 0.22})`;
     ctx.arc(
       p.x - radius * 0.28,
       p.y - radius * 0.28,
@@ -897,7 +940,13 @@ export function drawWires(ctx, nodes, wires, cam, wireState, options = {}) {
   const renderStyle = options.renderStyle ?? "real";
   const timeMs = options.timeMs ?? 0;
   const schematicMode = renderStyle === "schematic";
-  const showParticles = running && !schematicMode;
+  const particlesEnabled = options.particlesEnabled !== false;
+
+  // Particulele se bazează pe curenți calculați matematic din MNA:
+  // 1) calculăm curentul semnat la fiecare pin al componentelor;
+  // 2) respectăm KCL în fiecare net de fire;
+  // 3) rutăm particulele de la pini care injectează curent spre pini care absorb curent.
+  const showParticles = particlesEnabled && running && !schematicMode && !!sol?.ok;
   const wireFlowMap = showParticles
     ? buildWireFlowMap(nodes, wires, items, sol)
     : new Map();

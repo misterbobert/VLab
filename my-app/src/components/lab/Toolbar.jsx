@@ -30,7 +30,7 @@ function RenderStyleToggle({ value, onChange }) {
           !schematic ? "text-cyan-100" : "text-white/45",
         ].join(" ")}
       >
-        Vizual
+        Real
       </span>
 
       <button
@@ -58,9 +58,31 @@ function RenderStyleToggle({ value, onChange }) {
           schematic ? "text-cyan-100" : "text-white/45",
         ].join(" ")}
       >
-        Schematic
+        Schemă
       </span>
     </div>
+  );
+}
+
+function FlowToggle({ enabled, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        "rounded-xl border px-3 py-2 text-sm font-bold transition",
+        enabled
+          ? "border-emerald-300/35 bg-emerald-400/15 text-emerald-100 hover:bg-emerald-400/20"
+          : "border-rose-300/35 bg-rose-500/15 text-rose-100 hover:bg-rose-500/20",
+      ].join(" ")}
+      title={
+        enabled
+          ? "Dezactivează cerculețele care arată curentul prin fire"
+          : "Activează cerculețele care arată curentul prin fire"
+      }
+    >
+      {enabled ? "Flux ON" : "Flux OFF"}
+    </button>
   );
 }
 
@@ -95,9 +117,10 @@ export default function Toolbar() {
         </Btn>
       )}
 
-      <Btn danger onClick={() => actions.clearWires()}>
-        Ștergeți firele
-      </Btn>
+      <FlowToggle
+        enabled={state.particleFlowEnabled ?? true}
+        onClick={() => actions.toggleParticleFlow()}
+      />
 
       <div className="mx-1 hidden h-6 w-px bg-white/10 md:block" />
 
