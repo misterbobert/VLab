@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import React from "react";
+import PwaInstallButton from "./PwaInstallButton";
 
 const linkClass = ({ isActive }) =>
   [
@@ -31,13 +32,13 @@ export default function Navbar() {
           Exemple
         </NavLink>
 
-        <NavLink to="/tests" className={linkClass}>
-          Teste
-        </NavLink>
-
         <NavLink to="/about" className={linkClass}>
           Despre
         </NavLink>
+
+        <div className="ml-auto">
+          <PwaInstallButton />
+        </div>
       </div>
     </nav>
   );
